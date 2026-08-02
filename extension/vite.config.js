@@ -10,6 +10,7 @@ const resolve = (p) => fileURLToPath(new URL(p, import.meta.url));
 export default defineConfig({
   root: "sidepanel",
   base: "./",
+  cacheDir: "node_modules/.vite",
   build: {
     outDir: "../dist",
     emptyOutDir: true,
