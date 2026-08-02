@@ -4,7 +4,7 @@ import { CloseIcon, SendIcon } from "./icons.jsx";
 
 const EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
 
-function ChatWidget({ onClose }) {
+function ChatWidget({ siteName, onClose }) {
   const [value, setValue] = useState("");
   const textareaRef = useRef(null);
 
@@ -29,8 +29,11 @@ function ChatWidget({ onClose }) {
         <div className="gd-header__brand">
           <img className="gd-header__logo" src={logo} alt="" />
           <div className="gd-header__text">
-            <div className="gd-header__title">Guider</div>
-            <div className="gd-header__subtitle">AI 웹 내비게이션 도우미</div>
+            <div className="gd-header__title">
+              Guider
+              <span className="gd-header__sep">|</span>
+              <span className="gd-header__sitename">{siteName}</span>
+            </div>
           </div>
         </div>
         <button
