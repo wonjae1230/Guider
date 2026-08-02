@@ -1,12 +1,15 @@
 import { useRef, useState } from "react";
 import logo from "../assets/icons/icon128.png";
-import { CloseIcon, SendIcon } from "./icons.jsx";
+import { CloseIcon, MicIcon, SendIcon } from "./icons.jsx";
+import { useSpeechToText } from "./useSpeechToText.js";
 
 const EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
 
 function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const [value, setValue] = useState("");
   const textareaRef = useRef(null);
+  const { isSupported: isMicSupported, isListening, toggleListening } =
+    useSpeechToText(setValue);
 
   const handleSend = () => {
     const text = value.trim();
@@ -86,6 +89,17 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
           />
+          {isMicSupported && (
+            <button
+              type="button"
+              className={`gd-mic${isListening ? " gd-mic--active" : ""}`}
+              onClick={() => toggleListening(value)}
+              aria-label={isListening ? "음성 입력 중지" : "음성으로 입력"}
+              aria-pressed={isListening}
+            >
+              <MicIcon />
+            </button>
+          )}
           <button
             type="button"
             className="gd-send"

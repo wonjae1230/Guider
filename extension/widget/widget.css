@@ -280,6 +280,51 @@ img {
   color: #a6a2b3;
 }
 
+.gd-mic {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: #eceaf2;
+  color: #6b6680;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.gd-mic:hover {
+  background: #e2dff0;
+}
+
+.gd-mic:active {
+  transform: scale(0.95);
+}
+
+.gd-mic--active {
+  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  color: #fff;
+  box-shadow: 0 0 0 rgba(240, 22, 158, 0.4);
+  animation: gd-mic-pulse 1.4s ease-out infinite;
+}
+
+@keyframes gd-mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(240, 22, 158, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(240, 22, 158, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(240, 22, 158, 0);
+  }
+}
+
 .gd-send {
   flex-shrink: 0;
   width: 34px;
