@@ -1,4 +1,17 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# env files
+.env
+.env.local
+
+# OS / editor
 .DS_Store
 *.DS_Store
+
+# Project artifacts
 조홍소백원자료.zip
 조홍소백원자료/
