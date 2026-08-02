@@ -4,7 +4,7 @@ import { CloseIcon, SendIcon } from "./icons.jsx";
 
 const EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
 
-function ChatWidget({ siteName, onClose }) {
+function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const [value, setValue] = useState("");
   const textareaRef = useRef(null);
 
@@ -25,9 +25,14 @@ function ChatWidget({ siteName, onClose }) {
 
   return (
     <div className="gd-card">
-      <header className="gd-header">
+      <header className="gd-header" {...dragHandleProps}>
         <div className="gd-header__brand">
-          <img className="gd-header__logo" src={logo} alt="" />
+          <img
+            className="gd-header__logo"
+            src={logo}
+            alt=""
+            draggable="false"
+          />
           <div className="gd-header__text">
             <div className="gd-header__title">
               Guider

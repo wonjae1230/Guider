@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import ChatWidget from "./ChatWidget.jsx";
 import Launcher from "./Launcher.jsx";
+import { clampIntoViewport, useDraggable } from "./useDraggable.js";
 
 function getSiteName() {
   const ogSiteName = document
@@ -16,13 +17,23 @@ function getSiteName() {
 function App() {
   const [isOpen, setIsOpen] = useState(true);
   const siteName = getSiteName();
+  const rootRef = useRef(null);
+  const dragHandleProps = useDraggable(rootRef);
+
+  useLayoutEffect(() => {
+    clampIntoViewport(rootRef.current);
+  }, [isOpen]);
 
   return (
-    <div className="gd-root">
+    <div className="gd-root" ref={rootRef}>
       {isOpen ? (
-        <ChatWidget siteName={siteName} onClose={() => setIsOpen(false)} />
+        <ChatWidget
+          siteName={siteName}
+          dragHandleProps={dragHandleProps}
+          onClose={() => setIsOpen(false)}
+        />
       ) : (
-        <Launcher onClick={() => setIsOpen(true)} />
+        <Launcher dragHandleProps={dragHandleProps} onClick={() => setIsOpen(true)} />
       )}
     </div>
   );

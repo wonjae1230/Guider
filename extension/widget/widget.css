@@ -30,6 +30,11 @@ button {
   font: inherit;
 }
 
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
 /* Launcher (collapsed) */
 .gd-launcher {
   width: 56px;
@@ -40,7 +45,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   background: #ffffff;
   box-shadow:
     0 10px 24px rgba(123, 47, 247, 0.25),
@@ -55,6 +61,10 @@ button {
   box-shadow:
     0 14px 28px rgba(123, 47, 247, 0.3),
     0 2px 8px rgba(20, 10, 40, 0.12);
+}
+
+.gd-launcher:active {
+  cursor: grabbing;
 }
 
 .gd-launcher img {
@@ -86,6 +96,13 @@ button {
   padding: 16px 20px;
   border-bottom: 1px solid #f0eef4;
   flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.gd-header:active {
+  cursor: grabbing;
 }
 
 .gd-header__brand {
