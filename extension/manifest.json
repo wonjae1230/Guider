@@ -22,6 +22,11 @@
         "content/observer.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/widget.js"],
+      "run_at": "document_idle"
     }
   ],
   "permissions": ["sidePanel", "activeTab", "scripting"],
