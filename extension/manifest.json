@@ -29,7 +29,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["sidePanel", "activeTab", "scripting"],
+  "permissions": ["sidePanel", "activeTab", "scripting", "tabs"],
   "icons": {
     "16": "assets/icons/icon16.png",
     "32": "assets/icons/icon32.png",
