@@ -1,39 +1,35 @@
 {
   "manifest_version": 3,
   "name": "Guider",
-  "version": "0.0.1",
-  "description": "웹 페이지 사용법을 AI가 안내해주는 크롬 익스텐션",
+  "version": "1.0.0",
+  "description": "AI 기반 웹 안내 가이드 익스텐션",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "sidePanel",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://*/*"
+  ],
   "action": {
-    "default_title": "Guider"
+    "default_title": "Guider 열기"
   },
   "side_panel": {
-    "default_path": "index.html"
+    "default_path": "sidepanel.html"
   },
   "background": {
-    "service_worker": "background/background.js",
+    "service_worker": "background.js",
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": [
-        "content/domParser.js",
-        "content/highlighter.js",
-        "content/observer.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content/widget.js"],
-      "run_at": "document_idle"
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Guider 익스텐션 실행"
     }
-  ],
-  "permissions": ["sidePanel", "activeTab", "scripting"],
-  "icons": {
-    "16": "assets/icons/icon16.png",
-    "32": "assets/icons/icon32.png",
-    "48": "assets/icons/icon48.png",
-    "128": "assets/icons/icon128.png"
   }
 }
