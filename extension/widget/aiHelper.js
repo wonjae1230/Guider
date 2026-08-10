@@ -29,7 +29,7 @@ function maskText(text) {
   return result;
 }
 
-// ─── DOM 요소 추출 ────────────────────────────────────────────────────────────
+// ─── 가시성 체크 ──────────────────────────────────────────────────────────────
 
 // isVisible: 특정 window 컨텍스트에서 요소 표시 여부 확인
 // iframe 요소는 iframe 자신의 contentWindow를 넘겨야 올바른 스타일을 가져옵니다.
@@ -287,6 +287,24 @@ export function extractElements() {
 }
 
 /**
+ * 페이지의 헤딩(h1~h3) 구조를 추출합니다.
+ * AI가 페이지 섹션 구조를 이해하여 더 정확하게 요소를 찾을 수 있게 돕습니다.
+ */
+export function extractHeadings() {
+  const headings = [];
+  const frames = collectFrameDocs(document, window);
+
+  for (const { doc } of frames) {
+    for (const el of doc.querySelectorAll('h1, h2, h3')) {
+      const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+      if (text) headings.push(`${el.tagName}: ${text.slice(0, 80)}`);
+    }
+  }
+
+  return headings.slice(0, 20);
+}
+
+/**
  * 현재 페이지(+ 중첩된 same-origin iframe 전체)의 가시 텍스트를 추출합니다.
  * "총 학점이 몇 점이야?" 같은 정보 조회 질문에 답하기 위해 사용됩니다.
  * 최대 3000자로 잘라 토큰 낭비를 방지합니다.
@@ -313,15 +331,9 @@ export function extractPageText() {
 
 // ─── AI 호출 ─────────────────────────────────────────────────────────────────
 
-/**
- * 백엔드 /api/query에 질문과 DOM 요소를 전송하고 AI 응답을 반환합니다.
- * content script는 window.location.href로 현재 URL을 직접 가져옵니다.
- *
- * @returns {Promise<{ anchors: Array, reason: string }>}
- */
-export async function callAI(question, elements, pageText = '') {
+export async function callAI(question, elements, pageText = '', headings = []) {
   const controller = new AbortController();
-  const timer      = setTimeout(() => controller.abort(), 10000);
+  const timer      = setTimeout(() => controller.abort(), 15000);
 
   try {
     const response = await fetch(`${BACKEND_URL}/api/query`, {
@@ -330,7 +342,8 @@ export async function callAI(question, elements, pageText = '') {
       body:    JSON.stringify({
         question,
         elements,
-        pageText, // 정보 조회 질문 대응용 페이지 텍스트
+        pageText,
+        headings,
         url: window.location.href,
       }),
       signal: controller.signal,
@@ -419,16 +432,16 @@ function findElementInDoc(doc, anchor) {
     const candidates = doc.querySelectorAll(
       'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]',
     );
+    // 1. 표준 인터랙티브 요소 — 정확히 일치
     for (const el of candidates) {
       if ((el.innerText || el.value || '').trim() === anchor.text) return el;
     }
+    // 2. 표준 인터랙티브 요소 — 부분 포함
     for (const el of candidates) {
       const t = (el.innerText || el.value || '').trim();
       if (t && anchor.text.includes(t)) return el;
     }
-
-    // "성적정보"처럼 아코디언 트리거가 <a>/<button>이 아니라 그냥 <div>/<li>인 경우 대비.
-    // 오탐 방지를 위해 자기 자신에게 직접 텍스트를 가진(자식 요소가 없는) 요소로 제한합니다.
+    // 3. 비표준 클릭 요소(div/li 아코디언 트리거 등) — 직접 텍스트만 가진 leaf 요소로 제한
     const broad = doc.querySelectorAll('div, li, span, dt, th, td');
     for (const el of broad) {
       if (el.children.length === 0 && (el.innerText || el.textContent || '').trim() === anchor.text) {
@@ -472,8 +485,8 @@ function getAbsoluteRect(el, chain) {
 
 /**
  * 요소 하나에 배지/툴팁을 그립니다. 요소가 아직 (접힌 아코디언 등으로) 렌더링
- * 안 된 상태면(getBoundingClientRect가 0,0,0,0) 아무것도 그리지 않고 false를 반환합니다.
- * 반환값의 tooltip/badge는 나중에 removeMarkers에서 정확히 이 요소 것만 지우는 데 씁니다.
+ * 안 된 상태면(getBoundingClientRect가 0,0,0,0) 아무것도 그리지 않고 null을 반환합니다.
+ * 반환값의 tooltip/badge는 나중에 removeStepMarkers에서 정확히 이 요소 것만 지우는 데 씁니다.
  */
 function drawStepMarkers(el, doc, chain, i, multiStep) {
   ensureHighlightStyles(doc); // 요소가 속한 프레임의 document에도 주입 (.guider-hl 적용용)
@@ -490,10 +503,10 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
   const clampedLeft = Math.max(4, rect.left - 10);
 
   const tooltip = document.createElement('div');
-  tooltip.className  = TOOLTIP_CLASS;
+  tooltip.className   = TOOLTIP_CLASS;
   tooltip.textContent = multiStep ? `Step ${i + 1}` : '여기를 찾아보세요';
-  tooltip.style.top  = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
-  tooltip.style.left = `${Math.max(4, rect.left)}px`;
+  tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
+  tooltip.style.left  = `${Math.max(4, rect.left)}px`;
   document.body.appendChild(tooltip);
 
   let badge = null;
