@@ -361,3 +361,172 @@ img {
   font-size: 10.5px;
   color: #b3aec0;
 }
+
+/* ── 로딩 상태 ─────────────────────────────────────────────────────────────── */
+
+.gd-body--center {
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.gd-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #f0eef4;
+  border-top-color: #7b2ff7;
+  border-radius: 50%;
+  animation: gd-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes gd-spin {
+  to { transform: rotate(360deg); }
+}
+
+.gd-loading-text {
+  margin: 0;
+  font-size: 14px;
+  color: #7a768a;
+}
+
+/* ── 결과 상태 ─────────────────────────────────────────────────────────────── */
+
+.gd-body--result {
+  padding: 24px;
+  align-items: flex-start;
+  text-align: left;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.gd-result-reason {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #18122a;
+}
+
+.gd-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gd-step-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(240,22,158,0.06), rgba(123,47,247,0.06));
+  border-radius: 12px;
+}
+
+.gd-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.gd-step-label {
+  font-size: 13px;
+  color: #2c2636;
+  line-height: 1.4;
+}
+
+.gd-found-badge {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(240,22,158,0.06), rgba(123,47,247,0.06));
+  border-left: 3px solid #7b2ff7;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c2636;
+  box-sizing: border-box;
+}
+
+.gd-not-found {
+  margin: 0;
+  font-size: 13px;
+  color: #9a95a8;
+  font-style: italic;
+}
+
+/* ── 에러 상태 ─────────────────────────────────────────────────────────────── */
+
+.gd-error-msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e11d48;
+}
+
+/* ── 공통 버튼 ─────────────────────────────────────────────────────────────── */
+
+.gd-reset-btn {
+  all: unset;
+  box-sizing: border-box;
+  padding: 7px 16px;
+  border: 1.5px solid #7b2ff7;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7b2ff7;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.gd-reset-btn:hover {
+  background: rgba(123, 47, 247, 0.06);
+}
+
+.gd-reset-btn--error {
+  border-color: #e11d48;
+  color: #e11d48;
+}
+
+.gd-reset-btn--error:hover {
+  background: rgba(225, 29, 72, 0.06);
+}
+
+/* ── 정보 찾음 상태 (type: found) ─────────────────────────────────────────── */
+
+.gd-info-box {
+  width: 100%;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(5, 150, 105, 0.05));
+  border-left: 3px solid #10b981;
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gd-info-box__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #059669;
+  letter-spacing: 0.3px;
+}
+
+.gd-info-box__text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #065f46;
+}
