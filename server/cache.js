@@ -1,6 +1,6 @@
 const { createClient } = require("redis");
 
-//R Redis 서버에 연결할 클라이언트
+//Redis 서버에 연결할 클라이언트
 const redis = createClient({
     url:process.env.REDIS_URL || "redis://localhost:6379",
 });
