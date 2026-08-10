@@ -95,6 +95,16 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // (하이라이트는 DOM이 바뀌었을 수 있어 복원하지 않습니다)
   useEffect(() => {
     try {
+      // 새로고침(F5)은 sessionStorage 기준으로 "같은 탭, 같은 URL"이라 그냥 두면
+      // 이전 대화가 그대로 복원돼 버립니다. Navigation Timing API로 실제 새로고침인
+      // 경우만 구분해서 기록을 지우고 첫 화면(IDLE)으로 시작합니다.
+      // (링크 클릭 등으로 같은 URL에 돌아온 경우는 'navigate'라 기존처럼 복원됩니다)
+      const navEntry = performance.getEntriesByType('navigation')[0];
+      if (navEntry?.type === 'reload') {
+        sessionStorage.removeItem(TAB_STATE_KEY);
+        return;
+      }
+
       const saved = sessionStorage.getItem(TAB_STATE_KEY);
       if (!saved) return;
       const { question, result: savedResult, url } = JSON.parse(saved);
