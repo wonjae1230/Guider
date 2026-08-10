@@ -5,12 +5,10 @@
 // URL은 window.location.href로 직접 가져오고, DOM도 document에 직접 접근합니다.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BACKEND_URL    = 'http://localhost:3000';
+const BACKEND_URL     = 'http://localhost:3000';
 const HIGHLIGHT_CLASS = 'guider-hl';
 const TOOLTIP_CLASS   = 'guider-tt';
-
-// 하이라이트 색상: 위젯 브랜드 컬러(보라)와 통일
-const HL_COLOR = '#7b2ff7';
+const HL_COLOR        = '#7b2ff7';
 
 // ─── 민감정보 마스킹 ──────────────────────────────────────────────────────────
 
@@ -29,10 +27,9 @@ function maskText(text) {
   return result;
 }
 
-// ─── DOM 요소 추출 ────────────────────────────────────────────────────────────
+// ─── 가시성 체크 ──────────────────────────────────────────────────────────────
 
-// isVisible: 특정 window 컨텍스트에서 요소 표시 여부 확인
-// iframe 요소는 iframe 자신의 contentWindow를 넘겨야 올바른 스타일을 가져옵니다.
+// iframe 요소는 해당 iframe의 contentWindow를 넘겨야 올바른 스타일을 가져옵니다.
 function isVisible(el, win = window) {
   try {
     const s = win.getComputedStyle(el);
@@ -43,10 +40,13 @@ function isVisible(el, win = window) {
       el.offsetParent !== null
     );
   } catch {
-    return true; // 확인 불가 시 포함(크로스오리진 등)
+    return true;
   }
 }
 
+// ─── 선택자 ───────────────────────────────────────────────────────────────────
+
+// 일반 인터랙티브 요소 선택자
 const INTERACTIVE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
@@ -57,77 +57,187 @@ const INTERACTIVE_SELECTOR = [
   '[role="link"]',
   '[role="menuitem"]',
   '[role="tab"]',
-  // tabindex="0": 코레일처럼 div/span으로 만든 커스텀 인터랙티브 요소 포함
   '[tabindex="0"]:not(body)',
 ].join(', ');
 
-// 단일 document에서 인터랙티브 요소를 최대 limit개 추출합니다.
-function extractFromDoc(doc, win, limit = 100) {
-  const nodes    = doc.querySelectorAll(INTERACTIVE_SELECTOR);
-  const elements = [];
+// 네비게이션 전용 선택자 - 숨겨진 드롭다운·서브메뉴도 포함하기 위해 별도로 관리
+// 한국 사이트에서 자주 쓰이는 .gnb, .lnb, .snb, .depth 등의 클래스 패턴을 포함합니다.
+const NAV_SELECTOR = [
+  'nav a', 'nav button',
+  '[role="navigation"] a', '[role="navigation"] button',
+  'header a', 'header button',
+  '[class*="gnb"] a', '[class*="gnb"] button',
+  '[class*="lnb"] a', '[class*="lnb"] button',
+  '[class*="snb"] a', '[class*="snb"] button',
+  '[class*="depth"] a', '[class*="depth"] button',
+  '[class*="menu"] a', '[class*="menu"] button',
+  '[class*="nav"] a',  '[class*="nav"] button',
+  '[id*="gnb"] a',    '[id*="gnb"] button',
+  '[id*="lnb"] a',    '[id*="lnb"] button',
+  '[id*="menu"] a',   '[id*="menu"] button',
+  '[id*="nav"] a',    '[id*="nav"] button',
+].join(', ');
 
-  for (const node of nodes) {
-    if (!isVisible(node, win))                    continue;
-    if (node.getAttribute('type') === 'password') continue;
+// ─── 키워드 추출 및 관련도 점수 ───────────────────────────────────────────────
 
-    const rawText = (node.innerText || node.value || node.textContent || '')
-      .trim()
-      .replace(/\s+/g, ' ');
+const STOP_WORDS = new Set([
+  // 조사
+  '이', '가', '을', '를', '은', '는', '의', '에', '서', '로', '와', '과', '도', '만',
+  '에서', '으로', '한테', '에게', '부터', '까지',
+  // 접속사
+  '그리고', '하지만', '그런데', '그래서', '또한', '그러면', '그러나',
+  // 흔한 동사·형용사 어미
+  '싶어', '싶은데', '있어', '없어', '해줘', '해주세요', '알려줘', '봐줘',
+  '보고', '찾아', '알고싶어', '궁금해', '궁금한데', '하면', '되는', '있나요', '있어요',
+  // 의문사
+  '어떻게', '어디서', '어디', '뭐야', '뭐', '어떤', '무엇', '언제', '어때',
+]);
 
-    elements.push({
-      tag:       node.tagName.toLowerCase(),
-      id:        node.id                         || '',
-      ariaLabel: maskText(node.getAttribute('aria-label')),
-      role:      node.getAttribute('role')       || '',
-      text:      maskText(rawText.slice(0, 100)),
-      type:      node.getAttribute('type')       || '',
-    });
+function extractKeywords(question) {
+  return question
+    .replace(/[^\w\s가-힣]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+}
 
-    if (elements.length >= limit) break;
+// 키워드와 요소의 관련도 점수화
+// 양방향 포함 체크: 키워드가 요소 텍스트를 포함하거나, 요소 텍스트가 키워드를 포함
+// 예) 키워드 "로그인하려면" → 요소 "로그인" 매칭 (kwLow.includes(word))
+//     키워드 "학점"        → 요소 "학점조회" 매칭 (word.includes(kwLow))
+function scoreElement(el, keywords) {
+  if (!keywords.length) return 0;
+  const words = `${el.text} ${el.ariaLabel} ${el.id}`
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(w => w.length >= 2);
+  let score = 0;
+  for (const kw of keywords) {
+    const kwLow = kw.toLowerCase();
+    for (const word of words) {
+      if (word.includes(kwLow) || kwLow.includes(word)) {
+        score += 1;
+        break; // 같은 키워드로 중복 점수 방지
+      }
+    }
   }
+  return score;
+}
 
-  return elements;
+// ─── DOM 요소 추출 ────────────────────────────────────────────────────────────
+
+function nodeToElement(node, hidden = false) {
+  const rawText = (node.innerText || node.value || node.textContent || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return {
+    tag:       node.tagName.toLowerCase(),
+    id:        node.id                       || '',
+    ariaLabel: maskText(node.getAttribute('aria-label')),
+    role:      node.getAttribute('role')     || '',
+    text:      maskText(rawText.slice(0, 100)),
+    type:      node.getAttribute('type')     || '',
+    hidden,     // true이면 현재 화면에 보이지 않는 숨겨진 메뉴 항목
+  };
 }
 
 /**
  * 현재 페이지(+ same-origin iframe)의 인터랙티브 요소를 추출합니다.
- * 구형 대학 포털처럼 iframe 기반 구조도 지원합니다.
+ *
+ * 개선 사항:
+ *  1. 키워드 관련도 순 정렬: 질문과 관련 있는 요소가 항상 앞에 배치됩니다.
+ *  2. 숨겨진 네비게이션 포함: 드롭다운·서브메뉴 등 isVisible 체크를 통과 못 하는
+ *     nav/menu 영역 요소도 [숨겨진 메뉴]로 표시하여 AI에 전달합니다.
+ *  3. same-origin iframe 지원: 구형 포털(대학 사이트 등) 대응.
  */
-export function extractElements() {
-  const elements = extractFromDoc(document, window);
+export function extractElements(question = '') {
+  const keywords = extractKeywords(question);
+  const seen     = new Set();
+  const elements = [];
 
-  // same-origin iframe 내부 요소도 추가 추출
-  // cross-origin iframe은 보안 정책으로 접근 불가 → try/catch로 건너뜁니다.
+  function makeKey(node) {
+    return `${node.tagName}|${node.id}|${(node.innerText || node.value || '').slice(0, 40)}`;
+  }
+
+  function addFromDoc(doc, win) {
+    // 1단계: nav/메뉴 영역 - 숨겨진 것도 포함
+    for (const node of doc.querySelectorAll(NAV_SELECTOR)) {
+      if (node.getAttribute('type') === 'password') continue;
+      const key = makeKey(node);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      elements.push(nodeToElement(node, !isVisible(node, win)));
+    }
+
+    // 2단계: 일반 가시적 인터랙티브 요소
+    for (const node of doc.querySelectorAll(INTERACTIVE_SELECTOR)) {
+      if (!isVisible(node, win))                    continue;
+      if (node.getAttribute('type') === 'password') continue;
+      const key = makeKey(node);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      elements.push(nodeToElement(node, false));
+    }
+  }
+
+  addFromDoc(document, window);
+
+  // same-origin iframe 내부도 추출
   for (const iframe of document.querySelectorAll('iframe')) {
-    if (elements.length >= 100) break;
     try {
       const iDoc = iframe.contentDocument;
       const iWin = iframe.contentWindow;
-      if (!iDoc || !iWin) continue;
-
-      const iElements = extractFromDoc(iDoc, iWin, 100 - elements.length);
-      elements.push(...iElements);
+      if (iDoc && iWin) addFromDoc(iDoc, iWin);
     } catch {
       // cross-origin SecurityError 무시
     }
   }
 
-  return elements;
+  // 관련도 점수 기준 정렬
+  // 높은 점수 → 가시적 요소 → 숨겨진 메뉴 순
+  elements.sort((a, b) => {
+    const sA = scoreElement(a, keywords);
+    const sB = scoreElement(b, keywords);
+    if (sA !== sB) return sB - sA;
+    if (a.hidden !== b.hidden) return a.hidden ? 1 : -1;
+    return 0;
+  });
+
+  return elements.slice(0, 150);
 }
 
 /**
- * 현재 페이지(+ same-origin iframe)의 가시 텍스트를 추출합니다.
- * "총 학점이 몇 점이야?" 같은 정보 조회 질문에 답하기 위해 사용됩니다.
- * 최대 3000자로 잘라 토큰 낭비를 방지합니다.
+ * 페이지의 헤딩(h1~h3) 구조를 추출합니다.
+ * AI가 페이지 섹션 구조를 이해하여 더 정확하게 요소를 찾을 수 있게 돕습니다.
+ */
+export function extractHeadings() {
+  const headings = [];
+  const docs = [document];
+
+  for (const iframe of document.querySelectorAll('iframe')) {
+    try {
+      if (iframe.contentDocument) docs.push(iframe.contentDocument);
+    } catch {}
+  }
+
+  for (const doc of docs) {
+    for (const el of doc.querySelectorAll('h1, h2, h3')) {
+      const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+      if (text) headings.push(`${el.tagName}: ${text.slice(0, 80)}`);
+    }
+  }
+
+  return headings.slice(0, 20);
+}
+
+/**
+ * 페이지 텍스트를 추출합니다.
+ * 이미 화면에 표시된 정보(학점, 이메일 등)를 AI가 직접 읽어 답할 수 있게 합니다.
  */
 export function extractPageText() {
   function getTextFromDoc(doc) {
-    // 핵심 콘텐츠 영역 우선, 없으면 body 전체
     const area = doc.querySelector('main, #content, .content, #main, table') || doc.body;
     if (!area) return '';
-    return maskText(
-      (area.innerText || area.textContent || '').replace(/\s+/g, ' ').trim(),
-    );
+    return maskText((area.innerText || area.textContent || '').replace(/\s+/g, ' ').trim());
   }
 
   const parts = [getTextFromDoc(document)];
@@ -136,9 +246,7 @@ export function extractPageText() {
     try {
       const iDoc = iframe.contentDocument;
       if (iDoc) parts.push(getTextFromDoc(iDoc));
-    } catch {
-      // cross-origin 건너뜀
-    }
+    } catch {}
   }
 
   return parts.join('\n').slice(0, 3000);
@@ -146,15 +254,9 @@ export function extractPageText() {
 
 // ─── AI 호출 ─────────────────────────────────────────────────────────────────
 
-/**
- * 백엔드 /api/query에 질문과 DOM 요소를 전송하고 AI 응답을 반환합니다.
- * content script는 window.location.href로 현재 URL을 직접 가져옵니다.
- *
- * @returns {Promise<{ anchors: Array, reason: string }>}
- */
-export async function callAI(question, elements, pageText = '') {
+export async function callAI(question, elements, pageText = '', headings = []) {
   const controller = new AbortController();
-  const timer      = setTimeout(() => controller.abort(), 10000);
+  const timer      = setTimeout(() => controller.abort(), 15000);
 
   try {
     const response = await fetch(`${BACKEND_URL}/api/query`, {
@@ -163,7 +265,8 @@ export async function callAI(question, elements, pageText = '') {
       body:    JSON.stringify({
         question,
         elements,
-        pageText, // 정보 조회 질문 대응용 페이지 텍스트
+        pageText,
+        headings,
         url: window.location.href,
       }),
       signal: controller.signal,
@@ -186,7 +289,6 @@ export async function callAI(question, elements, pageText = '') {
 }
 
 // ─── 하이라이트 ───────────────────────────────────────────────────────────────
-// 하이라이트 대상은 메인 document의 요소이므로 Shadow DOM 외부에 스타일을 주입합니다.
 
 function ensureHighlightStyles() {
   if (document.getElementById('guider-hl-styles')) return;
@@ -242,10 +344,6 @@ function findElement(anchor) {
   return null;
 }
 
-/**
- * anchors 배열의 각 요소를 탐색해 하이라이트하고 툴팁을 표시합니다.
- * 첫 번째 요소로 스크롤합니다.
- */
 export function highlightAnchors(anchors) {
   clearHighlights();
   ensureHighlightStyles();
@@ -258,13 +356,12 @@ export function highlightAnchors(anchors) {
 
     el.classList.add(HIGHLIGHT_CLASS);
 
-    // 툴팁
     const rect    = el.getBoundingClientRect();
     const tooltip = document.createElement('div');
-    tooltip.className  = TOOLTIP_CLASS;
+    tooltip.className   = TOOLTIP_CLASS;
     tooltip.textContent = anchors.length > 1 ? `Step ${i + 1}` : '여기를 찾아보세요';
-    tooltip.style.top  = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
-    tooltip.style.left = `${rect.left}px`;
+    tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
+    tooltip.style.left  = `${rect.left}px`;
     document.body.appendChild(tooltip);
 
     if (!scrollTarget) scrollTarget = el;
@@ -273,9 +370,6 @@ export function highlightAnchors(anchors) {
   scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-/**
- * 모든 하이라이트와 툴팁을 제거합니다.
- */
 export function clearHighlights() {
   document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(el => {
     el.classList.remove(HIGHLIGHT_CLASS);
