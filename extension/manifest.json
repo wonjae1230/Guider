@@ -6,9 +6,6 @@
   "action": {
     "default_title": "Guider"
   },
-  "side_panel": {
-    "default_path": "index.html"
-  },
   "background": {
     "service_worker": "background/background.js",
     "type": "module"
@@ -16,24 +13,13 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": [
-        "content/domParser.js",
-        "content/highlighter.js",
-        "content/observer.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["<all_urls>"],
       "js": ["content/widget.js"],
       "run_at": "document_idle"
     }
   ],
   "permissions": [
-    "sidePanel",
     "activeTab",
     "scripting",
-    "tabs",
     "storage"
   ],
   "host_permissions": [
