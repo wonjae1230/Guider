@@ -13,8 +13,8 @@ const PHASE = {
   ERROR:   'error',
 };
 
-// navigate 타입 결과 후 다음 페이지 자동 재실행을 위한 세션 스토리지 키
-// chrome.storage.session은 브라우저 세션 동안 유지되어 MPA 전체 새로고침에도 살아있습니다.
+// navigate 타입 결과 후 다음 페이지 자동 재실행을 위한 키
+// sessionStorage는 같은 탭 내 MPA 페이지 이동에도 유지되며, 탭 종료 시 자동 삭제됩니다.
 const SESSION_KEY = 'guiderPendingQuery';
 
 // 탭별 대화 기억 키 (sessionStorage: 탭마다 독립, 탭 닫기 전까지 유지)
@@ -70,13 +70,15 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       } catch {}
 
       // navigate 타입이면 다음 페이지 이동 후 자동 재실행할 수 있도록 저장
-      if (aiResult.type === 'navigate') {
-        chrome.storage.session?.set({
-          [SESSION_KEY]: { question, fromUrl: location.href },
-        });
+      // sessionStorage는 같은 탭 내 MPA 이동에도 유지되어 chrome.storage.session보다 신뢰성이 높습니다.
+      // type 필드가 없는 캐시된 구버전 응답은 'navigate'로 간주합니다 (하위 호환).
+      const effectiveType = aiResult.type ?? 'navigate';
+      if (effectiveType === 'navigate' && aiResult.anchors?.length > 0) {
+        try {
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify({ question, fromUrl: location.href }));
+        } catch {}
       } else {
-        // 목표에 도달했으면 pending 제거
-        chrome.storage.session?.remove(SESSION_KEY);
+        try { sessionStorage.removeItem(SESSION_KEY); } catch {}
       }
     } catch (err) {
       setError(err.message || "알 수 없는 오류가 발생했습니다.");
@@ -106,14 +108,18 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     // MPA(전체 페이지 이동) 대응:
     // 이전 페이지에서 'navigate' 결과를 받은 후 사용자가 링크를 눌러 이동하면,
     // 새 페이지가 로드될 때 위젯이 다시 마운트되고 여기서 pending 질문을 자동 실행합니다.
-    chrome.storage.session?.get([SESSION_KEY], (res) => {
-      const pending = res?.[SESSION_KEY];
-      if (pending && pending.fromUrl !== location.href) {
-        chrome.storage.session.remove(SESSION_KEY);
-        lastQuestion.current = pending.question;
-        triggerQuery(pending.question);
+    // sessionStorage는 같은 탭 내 페이지 이동에도 유지됩니다.
+    try {
+      const pendingRaw = sessionStorage.getItem(SESSION_KEY);
+      if (pendingRaw) {
+        const pending = JSON.parse(pendingRaw);
+        if (pending.fromUrl !== location.href) {
+          sessionStorage.removeItem(SESSION_KEY);
+          lastQuestion.current = pending.question;
+          triggerQuery(pending.question);
+        }
       }
-    });
+    } catch {}
 
     // SPA(pushState/popstate) 대응:
     // navigate 결과 상태에서 URL이 바뀌면 같은 질문을 새 페이지에서 재실행합니다.
@@ -164,7 +170,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
   const handleReset = () => {
     clearHighlights();
-    chrome.storage.session?.remove(SESSION_KEY);
+    try { sessionStorage.removeItem(SESSION_KEY); } catch {}
     try { sessionStorage.removeItem(TAB_STATE_KEY); } catch {}
     setPhase(PHASE.IDLE);
     setResult(null);

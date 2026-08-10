@@ -290,6 +290,9 @@ export async function callAI(question, elements, pageText = '', headings = []) {
 
 // ─── 하이라이트 ───────────────────────────────────────────────────────────────
 
+// 활성 MutationObserver 목록 — clearHighlights 호출 시 일괄 해제
+const _activeObservers = [];
+
 function ensureHighlightStyles() {
   if (document.getElementById('guider-hl-styles')) return;
 
@@ -320,7 +323,39 @@ function ensureHighlightStyles() {
   document.head.appendChild(style);
 }
 
+// 요소에 하이라이트 클래스와 툴팁을 추가합니다.
+function addHighlight(el, label) {
+  el.classList.add(HIGHLIGHT_CLASS);
+
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return; // 실제 크기 없으면 툴팁 생략
+
+  const tooltip = document.createElement('div');
+  tooltip.className   = TOOLTIP_CLASS;
+  tooltip.textContent = label;
+  tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
+  tooltip.style.left  = `${rect.left}px`;
+  document.body.appendChild(tooltip);
+}
+
+// 숨겨진 요소의 DOM 트리를 올라가며 가시적이고 인터랙티브한 트리거 요소를 찾습니다.
+// 예: display:none 서브메뉴 항목 → 그것을 열어주는 상위 메뉴 버튼
+function findVisibleTrigger(hiddenEl) {
+  let current = hiddenEl.parentElement;
+  while (current && current !== document.body) {
+    if (isVisible(current)) {
+      if (current.matches('a, button, [role="button"], [tabindex]')) return current;
+      const child = current.querySelector('a, button, [role="button"]');
+      if (child && isVisible(child)) return child;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
 function findElement(anchor) {
+  const CANDIDATES = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]';
+
   if (anchor.id) {
     const el = document.getElementById(anchor.id);
     if (el) return el;
@@ -330,20 +365,37 @@ function findElement(anchor) {
     if (el) return el;
   }
   if (anchor.text) {
-    const candidates = document.querySelectorAll(
-      'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]',
-    );
+    const candidates = [...document.querySelectorAll(CANDIDATES)];
+    // 1. 가시적 요소 — 정확히 일치
     for (const el of candidates) {
-      if ((el.innerText || el.value || '').trim() === anchor.text) return el;
+      if (isVisible(el) && (el.innerText || el.value || '').trim() === anchor.text) return el;
     }
+    // 2. 가시적 요소 — 포함 관계
     for (const el of candidates) {
+      if (!isVisible(el)) continue;
       const t = (el.innerText || el.value || '').trim();
       if (t && anchor.text.includes(t)) return el;
+    }
+    // 3. 숨겨진 요소 중 트리거가 있는 것 우선 (모바일 메뉴처럼 트리거가 없는 요소보다 데스크톱 드롭다운 선호)
+    for (const el of candidates) {
+      const t = (el.innerText || el.value || '').trim();
+      if (t === anchor.text && !isVisible(el) && findVisibleTrigger(el) !== null) return el;
+    }
+    // 4. 숨겨진 요소 — 마지막 폴백
+    for (const el of candidates) {
+      if ((el.innerText || el.value || '').trim() === anchor.text) return el;
     }
   }
   return null;
 }
 
+/**
+ * anchors 배열의 각 요소를 탐색해 하이라이트하고 툴팁을 표시합니다.
+ *
+ * 가시적 요소: 바로 하이라이트합니다.
+ * 숨겨진 요소(드롭다운 등): 상위 트리거를 먼저 하이라이트하고,
+ *   MutationObserver로 요소가 보이기 시작하면 자동으로 하이라이트를 전환합니다.
+ */
 export function highlightAnchors(anchors) {
   clearHighlights();
   ensureHighlightStyles();
@@ -354,23 +406,50 @@ export function highlightAnchors(anchors) {
     const el = findElement(anchor);
     if (!el) return;
 
-    el.classList.add(HIGHLIGHT_CLASS);
+    const label = anchors.length > 1 ? `Step ${i + 1}` : '여기를 찾아보세요';
 
-    const rect    = el.getBoundingClientRect();
-    const tooltip = document.createElement('div');
-    tooltip.className   = TOOLTIP_CLASS;
-    tooltip.textContent = anchors.length > 1 ? `Step ${i + 1}` : '여기를 찾아보세요';
-    tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
-    tooltip.style.left  = `${rect.left}px`;
-    document.body.appendChild(tooltip);
+    if (isVisible(el)) {
+      addHighlight(el, label);
+      if (!scrollTarget) scrollTarget = el;
+    } else {
+      // 숨겨진 요소: 상위 트리거를 먼저 하이라이트
+      const trigger = findVisibleTrigger(el);
+      if (trigger) {
+        addHighlight(trigger, label);
+        if (!scrollTarget) scrollTarget = trigger;
+      }
 
-    if (!scrollTarget) scrollTarget = el;
+      // 요소가 보이기 시작하면 트리거 → 실제 요소로 하이라이트 전환
+      const obs = new MutationObserver(() => {
+        if (!isVisible(el)) return;
+        obs.disconnect();
+        if (trigger) trigger.classList.remove(HIGHLIGHT_CLASS);
+        document.querySelectorAll(`.${TOOLTIP_CLASS}`).forEach(t => t.remove());
+        addHighlight(el, label);
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+
+      obs.observe(document.body, {
+        attributes:      true,
+        subtree:         true,
+        attributeFilter: ['style', 'class'],
+      });
+
+      _activeObservers.push(obs);
+      setTimeout(() => obs.disconnect(), 30_000); // 30초 후 자동 해제
+    }
   });
 
   scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+/**
+ * 모든 하이라이트, 툴팁, MutationObserver를 제거합니다.
+ */
 export function clearHighlights() {
+  _activeObservers.forEach(obs => obs.disconnect());
+  _activeObservers.length = 0;
+
   document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(el => {
     el.classList.remove(HIGHLIGHT_CLASS);
   });
