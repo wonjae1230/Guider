@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "../assets/icons/icon128.png";
 import { CloseIcon, MicIcon, SendIcon } from "./icons.jsx";
 import { useSpeechToText } from "./useSpeechToText.js";
-import { extractElements, extractPageText, callAI, highlightAnchors, clearHighlights } from "./aiHelper.js";
+import { extractElements, extractPageText, callAI, highlightAnchors, clearHighlights, waitForIframesReady } from "./aiHelper.js";
 
 const EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
 
@@ -48,6 +48,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     clearHighlights();
 
     try {
+      await waitForIframesReady();
       const elements = extractElements();
       const pageText = extractPageText();
       const aiResult = await callAI(question, elements, pageText);

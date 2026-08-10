@@ -89,34 +89,110 @@ function extractFromDoc(doc, win, limit = 100) {
   return elements;
 }
 
-/**
- * 현재 페이지(+ same-origin iframe)의 인터랙티브 요소를 추출합니다.
- * 구형 대학 포털처럼 iframe 기반 구조도 지원합니다.
- */
-export function extractElements() {
-  const elements = extractFromDoc(document, window);
+// 클래스넷처럼 iframe 안에 또 iframe(header/menu/main/footer 등 프레임셋)이
+// 중첩된 구조를 감안해, 몇 단계까지 파고들지 정하는 상한선입니다.
+const MAX_FRAME_DEPTH = 4;
 
-  // same-origin iframe 내부 요소도 추가 추출
-  // cross-origin iframe은 보안 정책으로 접근 불가 → try/catch로 건너뜁니다.
-  for (const iframe of document.querySelectorAll('iframe')) {
-    if (elements.length >= 100) break;
+/**
+ * same-origin iframe들을 재귀적으로 아직 로딩 중이면 완료(또는 타임아웃)까지 기다립니다.
+ *
+ * iframe.contentDocument는 same-origin이면 로딩 중에도 항상 접근되므로,
+ * readyState를 확인하지 않으면 frame.jsp처럼 콘텐츠가 늦게 채워지는
+ * 구형 JSP 포털에서 아직 비어있는 문서를 그대로 읽어 빈 배열을 반환하게 됩니다.
+ * (PR #10 자동 재실행 이후 바로 추출이 실행될 때 특히 잘 발생합니다.)
+ *
+ * frame.jsp 자체가 header/menu/main/footer 같은 하위 iframe을 또 담은
+ * 프레임셋인 경우가 있어, 로드가 끝난 iframe 안으로도 재귀적으로 들어갑니다.
+ */
+export async function waitForIframesReady(root = document, timeoutMs = 2000, depth = 0) {
+  if (depth >= MAX_FRAME_DEPTH) return;
+
+  // <frame>은 <frameset> 기반 구형 페이지에서 쓰이는 태그로, <iframe>과 별개 셀렉터가 필요합니다.
+  const iframes = Array.from(root.querySelectorAll('iframe, frame'));
+
+  await Promise.all(
+    iframes.map(async (iframe) => {
+      let doc;
+      try {
+        doc = iframe.contentDocument;
+      } catch {
+        return; // cross-origin: 기다릴 수 없으니 바로 진행
+      }
+      if (!doc) return;
+
+      if (doc.readyState !== 'complete') {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, timeoutMs);
+          iframe.addEventListener('load', () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+        try {
+          doc = iframe.contentDocument; // load 이후 문서가 교체됐을 수 있어 다시 조회
+        } catch {
+          return;
+        }
+      }
+
+      if (doc) await waitForIframesReady(doc, timeoutMs, depth + 1);
+    }),
+  );
+}
+
+/**
+ * root 문서와 그 안에 중첩된 모든 same-origin iframe 문서를 재귀적으로 모읍니다.
+ * cross-origin iframe은 SecurityError로 접근이 막히므로 건너뜁니다.
+ */
+function collectFrameDocs(doc, win, depth = 0, path = 'top', acc = []) {
+  acc.push({ doc, win, path });
+  console.log(`[Guider] 프레임 방문: ${path} (depth=${depth}, readyState=${doc.readyState})`);
+
+  if (depth >= MAX_FRAME_DEPTH) return acc;
+
+  // <frame>은 <frameset> 기반 구형 페이지(클래스넷 등)에서 쓰이는 태그로, <iframe>과 별개 셀렉터가 필요합니다.
+  for (const iframe of doc.querySelectorAll('iframe, frame')) {
     try {
       const iDoc = iframe.contentDocument;
       const iWin = iframe.contentWindow;
-      if (!iDoc || !iWin) continue;
-
-      const iElements = extractFromDoc(iDoc, iWin, 100 - elements.length);
-      elements.push(...iElements);
-    } catch {
-      // cross-origin SecurityError 무시
+      if (!iDoc || !iWin) {
+        console.log(`[Guider] ${iframe.tagName} contentDocument 없음 (${path}):`, iframe.src);
+        continue;
+      }
+      collectFrameDocs(iDoc, iWin, depth + 1, `${path} > ${iframe.name || iframe.src || iframe.tagName.toLowerCase()}`, acc);
+    } catch (err) {
+      console.log(`[Guider] ${iframe.tagName} 접근 실패(교차 출처 등, ${path}):`, iframe.src, err.message);
     }
+  }
+
+  return acc;
+}
+
+/**
+ * 현재 페이지(+ 중첩된 same-origin iframe 전체)의 인터랙티브 요소를 추출합니다.
+ * 구형 대학 포털처럼 iframe(심지어 iframe 안의 iframe) 기반 구조도 지원합니다.
+ *
+ * extractElements/extractPageText 호출 전에 waitForIframesReady()로
+ * iframe 로딩을 기다려야 콘텐츠가 채워진 상태를 읽을 수 있습니다.
+ */
+export function extractElements() {
+  const frames = collectFrameDocs(document, window);
+  const elements = [];
+
+  for (const { doc, win, path } of frames) {
+    if (elements.length >= 100) break;
+    const found = extractFromDoc(doc, win, 100 - elements.length);
+    if (found.length > 0) {
+      console.log(`[Guider] 요소 추출 (${path}):`, found.length, '개');
+    }
+    elements.push(...found);
   }
 
   return elements;
 }
 
 /**
- * 현재 페이지(+ same-origin iframe)의 가시 텍스트를 추출합니다.
+ * 현재 페이지(+ 중첩된 same-origin iframe 전체)의 가시 텍스트를 추출합니다.
  * "총 학점이 몇 점이야?" 같은 정보 조회 질문에 답하기 위해 사용됩니다.
  * 최대 3000자로 잘라 토큰 낭비를 방지합니다.
  */
@@ -130,16 +206,12 @@ export function extractPageText() {
     );
   }
 
-  const parts = [getTextFromDoc(document)];
-
-  for (const iframe of document.querySelectorAll('iframe')) {
-    try {
-      const iDoc = iframe.contentDocument;
-      if (iDoc) parts.push(getTextFromDoc(iDoc));
-    } catch {
-      // cross-origin 건너뜀
-    }
-  }
+  const frames = collectFrameDocs(document, window);
+  const parts = frames.map(({ doc, path }) => {
+    const text = getTextFromDoc(doc);
+    console.log(`[Guider] 텍스트 추출 (${path}):`, text.length, '자');
+    return text;
+  });
 
   return parts.join('\n').slice(0, 3000);
 }
