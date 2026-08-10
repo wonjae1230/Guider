@@ -306,7 +306,7 @@ function ensureHighlightStyles() {
       transition: outline 0.15s ease !important;
     }
     .${TOOLTIP_CLASS} {
-      position:      fixed;
+      position:      absolute;
       background:    ${HL_COLOR};
       color:         #fff;
       padding:       4px 10px;
@@ -333,8 +333,10 @@ function addHighlight(el, label) {
   const tooltip = document.createElement('div');
   tooltip.className   = TOOLTIP_CLASS;
   tooltip.textContent = label;
-  tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
-  tooltip.style.left  = `${rect.left}px`;
+  const scrollY = window.scrollY ?? window.pageYOffset ?? 0;
+  const scrollX = window.scrollX ?? window.pageXOffset ?? 0;
+  tooltip.style.top   = rect.top > 40 ? `${rect.top + scrollY - 32}px` : `${rect.bottom + scrollY + 6}px`;
+  tooltip.style.left  = `${rect.left + scrollX}px`;
   document.body.appendChild(tooltip);
 }
 
