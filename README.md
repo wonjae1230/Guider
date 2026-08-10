@@ -5,6 +5,14 @@
 
 ---
 
+## 문서
+
+| 문서 | 링크 |
+|---|---|
+| 요구사항 정의서 | [📄 요구사항 정의서.xlsx](https://hongik-my.sharepoint.com/:x:/r/personal/sojoongyi_mail_hongik_ac_kr/Documents/%E1%84%8B%E1%85%AD%E1%84%80%E1%85%AE%E1%84%89%E1%85%A1%E1%84%92%E1%85%A1%E1%86%BC_%E1%84%8C%E1%85%A5%E1%86%BC%E1%84%8B%E1%85%B4%E1%84%89%E1%85%A5.xlsx?d=we3cbdf7a83224c9e9ed93f8d0fce3645&csf=1&web=1&e=CcOmOD) |
+
+---
+
 ## 아키텍처
 
 ```
