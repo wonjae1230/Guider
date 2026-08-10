@@ -29,17 +29,21 @@ const MODEL = 'claude-haiku-4-5-20251001';
 // ─── 시스템 프롬프트 ──────────────────────────────────────────────────────────
 // 모든 요청에서 동일하게 사용되므로 cache_control: ephemeral 지정
 // → Anthropic Prompt Caching이 활성화되어 반복 호출 시 비용·속도 개선
-const SYSTEM_PROMPT = `당신은 웹 페이지 UI 가이드 도우미입니다.
-사용자 질문과 페이지의 인터랙티브 DOM 요소 목록이 주어집니다.
-사용자가 원하는 작업을 수행할 수 있는 UI 요소를 찾아 아래 JSON 형식으로만 응답하세요.
+const SYSTEM_PROMPT = `당신은 웹 페이지 AI 가이드 도우미입니다.
+사용자 질문, 페이지의 인터랙티브 DOM 요소 목록, 그리고 페이지 텍스트가 주어집니다.
+아래 JSON 형식으로만 응답하세요.
 
 응답 형식:
-{"anchors":[{"id":"요소id","ariaLabel":"aria-label값","text":"요소텍스트"}],"reason":"한국어 안내 메시지"}
+{"type":"navigate","anchors":[{"id":"요소id","ariaLabel":"aria-label값","text":"요소텍스트"}],"reason":"한국어 안내 메시지"}
 
-규칙:
+type 값 규칙:
+- "navigate": 사용자가 클릭하거나 이동해야 하는 UI 요소를 찾은 경우. anchors에 해당 요소 포함.
+- "found": 페이지 텍스트에서 정보를 직접 읽어 답변 가능한 경우(예: 이메일, 학점, 이름). anchors는 []. reason에 찾은 정보를 직접 답변.
+- "notfound": 해당 기능이나 정보를 찾을 수 없는 경우. anchors는 []. reason에 이유 설명.
+
+공통 규칙:
 - anchors는 반드시 제공된 DOM 요소 목록에 있는 요소만 포함하세요
 - anchors는 최대 3개까지만 반환하세요 (여러 단계가 필요한 경우 순서대로 나열)
-- 해당 기능을 찾을 수 없으면 anchors를 []로, reason에 찾지 못한 이유와 안내를 작성하세요
 - 검색 기능 사용이나 외부 링크 이동은 절대 추천하지 마세요
 - JSON 외의 텍스트는 절대 출력하지 마세요`;
 
@@ -76,7 +80,7 @@ function formatElements(elements) {
  *  5. 결과 반환
  */
 app.post('/api/query', async (req, res) => {
-  const { question, elements, url } = req.body;
+  const { question, elements, url, pageText = '' } = req.body;
 
   // 필수 파라미터 누락 검사
   if (!question || !elements || !url) {
@@ -102,7 +106,11 @@ app.post('/api/query', async (req, res) => {
   }
 
   // ── 2단계: Claude API 호출 ─────────────────────────────────────────────────
-  const userMessage = `사용자 질문: ${question}\n\nDOM 요소 목록:\n${formatElements(elements)}`;
+  // pageText가 있으면 정보 조회 질문(학점, 이름 등)에도 답할 수 있도록 함께 전달
+  let userMessage = `사용자 질문: ${question}\n\nDOM 요소 목록:\n${formatElements(elements)}`;
+  if (pageText) {
+    userMessage += `\n\n페이지 텍스트 (이미 화면에 표시된 정보):\n${pageText}`;
+  }
 
   try {
     const response = await claude.messages.create({

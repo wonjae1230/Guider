@@ -31,39 +31,44 @@ function maskText(text) {
 
 // ─── DOM 요소 추출 ────────────────────────────────────────────────────────────
 
-function isVisible(el) {
-  const s = window.getComputedStyle(el);
-  return (
-    s.display    !== 'none'   &&
-    s.visibility !== 'hidden' &&
-    s.opacity    !== '0'      &&
-    el.offsetParent !== null
-  );
+// isVisible: 특정 window 컨텍스트에서 요소 표시 여부 확인
+// iframe 요소는 iframe 자신의 contentWindow를 넘겨야 올바른 스타일을 가져옵니다.
+function isVisible(el, win = window) {
+  try {
+    const s = win.getComputedStyle(el);
+    return (
+      s.display    !== 'none'   &&
+      s.visibility !== 'hidden' &&
+      s.opacity    !== '0'      &&
+      el.offsetParent !== null
+    );
+  } catch {
+    return true; // 확인 불가 시 포함(크로스오리진 등)
+  }
 }
 
-/**
- * 현재 페이지의 인터랙티브 요소를 추출합니다.
- * domParser.js와 동일한 로직이지만 content script 직접 실행 버전입니다.
- */
-export function extractElements() {
-  const selector = [
-    'a[href]',
-    'button:not([disabled])',
-    'input:not([type="hidden"]):not([disabled])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    '[role="button"]',
-    '[role="link"]',
-    '[role="menuitem"]',
-    '[role="tab"]',
-  ].join(', ');
+const INTERACTIVE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([type="hidden"]):not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="tab"]',
+  // tabindex="0": 코레일처럼 div/span으로 만든 커스텀 인터랙티브 요소 포함
+  '[tabindex="0"]:not(body)',
+].join(', ');
 
-  const nodes    = document.querySelectorAll(selector);
+// 단일 document에서 인터랙티브 요소를 최대 limit개 추출합니다.
+function extractFromDoc(doc, win, limit = 100) {
+  const nodes    = doc.querySelectorAll(INTERACTIVE_SELECTOR);
   const elements = [];
 
   for (const node of nodes) {
-    if (!isVisible(node))                      continue;
-    if (node.getAttribute('type') === 'password') continue; // 비밀번호 필드 제외
+    if (!isVisible(node, win))                    continue;
+    if (node.getAttribute('type') === 'password') continue;
 
     const rawText = (node.innerText || node.value || node.textContent || '')
       .trim()
@@ -78,10 +83,65 @@ export function extractElements() {
       type:      node.getAttribute('type')       || '',
     });
 
-    if (elements.length >= 100) break;
+    if (elements.length >= limit) break;
   }
 
   return elements;
+}
+
+/**
+ * 현재 페이지(+ same-origin iframe)의 인터랙티브 요소를 추출합니다.
+ * 구형 대학 포털처럼 iframe 기반 구조도 지원합니다.
+ */
+export function extractElements() {
+  const elements = extractFromDoc(document, window);
+
+  // same-origin iframe 내부 요소도 추가 추출
+  // cross-origin iframe은 보안 정책으로 접근 불가 → try/catch로 건너뜁니다.
+  for (const iframe of document.querySelectorAll('iframe')) {
+    if (elements.length >= 100) break;
+    try {
+      const iDoc = iframe.contentDocument;
+      const iWin = iframe.contentWindow;
+      if (!iDoc || !iWin) continue;
+
+      const iElements = extractFromDoc(iDoc, iWin, 100 - elements.length);
+      elements.push(...iElements);
+    } catch {
+      // cross-origin SecurityError 무시
+    }
+  }
+
+  return elements;
+}
+
+/**
+ * 현재 페이지(+ same-origin iframe)의 가시 텍스트를 추출합니다.
+ * "총 학점이 몇 점이야?" 같은 정보 조회 질문에 답하기 위해 사용됩니다.
+ * 최대 3000자로 잘라 토큰 낭비를 방지합니다.
+ */
+export function extractPageText() {
+  function getTextFromDoc(doc) {
+    // 핵심 콘텐츠 영역 우선, 없으면 body 전체
+    const area = doc.querySelector('main, #content, .content, #main, table') || doc.body;
+    if (!area) return '';
+    return maskText(
+      (area.innerText || area.textContent || '').replace(/\s+/g, ' ').trim(),
+    );
+  }
+
+  const parts = [getTextFromDoc(document)];
+
+  for (const iframe of document.querySelectorAll('iframe')) {
+    try {
+      const iDoc = iframe.contentDocument;
+      if (iDoc) parts.push(getTextFromDoc(iDoc));
+    } catch {
+      // cross-origin 건너뜀
+    }
+  }
+
+  return parts.join('\n').slice(0, 3000);
 }
 
 // ─── AI 호출 ─────────────────────────────────────────────────────────────────
@@ -92,7 +152,7 @@ export function extractElements() {
  *
  * @returns {Promise<{ anchors: Array, reason: string }>}
  */
-export async function callAI(question, elements) {
+export async function callAI(question, elements, pageText = '') {
   const controller = new AbortController();
   const timer      = setTimeout(() => controller.abort(), 10000);
 
@@ -103,7 +163,8 @@ export async function callAI(question, elements) {
       body:    JSON.stringify({
         question,
         elements,
-        url: window.location.href, // chrome.tabs 불필요
+        pageText, // 정보 조회 질문 대응용 페이지 텍스트
+        url: window.location.href,
       }),
       signal: controller.signal,
     });

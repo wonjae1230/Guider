@@ -502,3 +502,31 @@ img {
 .gd-reset-btn--error:hover {
   background: rgba(225, 29, 72, 0.06);
 }
+
+/* ── 정보 찾음 상태 (type: found) ─────────────────────────────────────────── */
+
+.gd-info-box {
+  width: 100%;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(5, 150, 105, 0.05));
+  border-left: 3px solid #10b981;
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gd-info-box__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #059669;
+  letter-spacing: 0.3px;
+}
+
+.gd-info-box__text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #065f46;
+}
