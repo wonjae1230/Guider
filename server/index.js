@@ -44,6 +44,10 @@ type 값 규칙:
 공통 규칙:
 - anchors는 반드시 제공된 DOM 요소 목록에 있는 요소만 포함하세요
 - anchors는 최대 3개까지만 반환하세요 (여러 단계가 필요한 경우 순서대로 나열)
+- 요소 목록에 visible=false가 표시된 항목은 아코디언/드롭다운 메뉴 등으로 접혀 있어
+  바로 클릭할 수 없는 상태입니다. 이런 요소를 목표로 고를 경우, 함께 표시된
+  revealBy 요소를 anchors의 1번째로, 목표 요소를 2번째로 넣어 2단계로 안내하세요.
+  revealBy가 없으면 해당 요소 대신 다른 방법을 찾거나 notfound로 응답하세요.
 - 검색 기능 사용이나 외부 링크 이동은 절대 추천하지 마세요
 - JSON 외의 텍스트는 절대 출력하지 마세요`;
 
@@ -55,13 +59,18 @@ type 값 규칙:
  * 예시 출력:
  *   1. tag=a id="menu-link" aria-label="수강신청" role="" text="수강신청"
  *   2. tag=button id="" aria-label="" role="button" text="로그인"
+ *   3. tag=a id="grade-link" aria-label="" role="" text="금학기성적조회" visible=false revealBy="성적정보"
  */
 function formatElements(elements) {
   return elements
-    .map(
-      (el, i) =>
-        `${i + 1}. tag=${el.tag} id="${el.id}" aria-label="${el.ariaLabel}" role="${el.role}" text="${el.text}"`,
-    )
+    .map((el, i) => {
+      const base = `${i + 1}. tag=${el.tag} id="${el.id}" aria-label="${el.ariaLabel}" role="${el.role}" text="${el.text}"`;
+      if (el.visible === false) {
+        const revealText = el.revealBy?.text || el.revealBy?.ariaLabel || el.revealBy?.id || '';
+        return `${base} visible=false revealBy="${revealText}"`;
+      }
+      return base;
+    })
     .join('\n');
 }
 
