@@ -530,30 +530,34 @@ img {
   all: unset;
   box-sizing: border-box;
   width: 100%;
-  padding: 11px 16px;
+  padding: 10px 16px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  background: rgba(123, 47, 247, 0.08);
+  border: 1px solid rgba(123, 47, 247, 0.22);
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: #7b2ff7;
   text-align: center;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(123, 47, 247, 0.28);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 
 .gd-reset-btn:hover {
-  filter: brightness(1.06);
-  box-shadow: 0 6px 18px rgba(123, 47, 247, 0.34);
+  background: rgba(123, 47, 247, 0.14);
 }
 
 .gd-reset-btn:active {
-  transform: scale(0.98);
+  transform: scale(0.99);
 }
 
 .gd-reset-btn--error {
-  background: linear-gradient(135deg, #e11d48, #f0169e);
-  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.28);
+  background: rgba(225, 29, 72, 0.08);
+  border-color: rgba(225, 29, 72, 0.22);
+  color: #e11d48;
+}
+
+.gd-reset-btn--error:hover {
+  background: rgba(225, 29, 72, 0.14);
 }
 
 .gd-reset-btn--error:hover {
