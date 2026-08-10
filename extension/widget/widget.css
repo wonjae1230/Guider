@@ -1,0 +1,593 @@
+:host,
+.gd-root {
+  all: initial;
+}
+
+.gd-root,
+.gd-root * {
+  box-sizing: border-box;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
+    sans-serif;
+}
+
+.gd-root {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2147483647;
+  display: block;
+}
+
+button {
+  font: inherit;
+}
+
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* Launcher (collapsed) */
+.gd-launcher {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  background: #ffffff;
+  box-shadow:
+    0 10px 24px rgba(123, 47, 247, 0.25),
+    0 2px 8px rgba(20, 10, 40, 0.1);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.gd-launcher:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 14px 28px rgba(123, 47, 247, 0.3),
+    0 2px 8px rgba(20, 10, 40, 0.12);
+}
+
+.gd-launcher:active {
+  cursor: grabbing;
+}
+
+.gd-launcher img {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+}
+
+/* Card */
+.gd-card {
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow:
+    0 20px 60px rgba(20, 10, 40, 0.18),
+    0 4px 16px rgba(20, 10, 40, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header */
+.gd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0eef4;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.gd-header:active {
+  cursor: grabbing;
+}
+
+.gd-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gd-header__logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.gd-header__text {
+  min-width: 0;
+}
+
+.gd-header__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #18122a;
+  line-height: 1.3;
+}
+
+.gd-header__sep {
+  color: #d6d3de;
+  font-weight: 400;
+}
+
+.gd-header__sitename {
+  font-weight: 700;
+  color: #6b6680;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gd-header__close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: #f4f3f7;
+  color: #9a95a8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.gd-header__close:hover {
+  background: #e9e7ee;
+  color: #4a4458;
+}
+
+/* Body */
+.gd-body {
+  padding: 28px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  overflow-y: auto;
+}
+
+.gd-body__hero {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 8px 16px rgba(123, 47, 247, 0.25));
+}
+
+.gd-body__heading {
+  margin: 0 0 10px;
+  font-size: 19px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.gd-body__desc {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #7a768a;
+}
+
+.gd-examples {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gd-example {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+  background: #fdf1fb;
+  border: 1px solid #f7e2f6;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.gd-example:hover {
+  background: #fce6fa;
+  border-color: #f0c7ec;
+}
+
+.gd-example__label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #e0389c;
+  letter-spacing: 0.2px;
+}
+
+.gd-example__text {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #2c2636;
+}
+
+/* Footer */
+.gd-footer {
+  padding: 16px 20px 18px;
+  border-top: 1px solid #f0eef4;
+  flex-shrink: 0;
+}
+
+.gd-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  background: #f5f4f8;
+  border-radius: 20px;
+  padding: 6px 6px 6px 16px;
+}
+
+.gd-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  resize: none;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: #2c2636;
+  padding: 8px 0;
+  max-height: 80px;
+}
+
+.gd-input::placeholder {
+  color: #a6a2b3;
+}
+
+.gd-mic {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: #eceaf2;
+  color: #6b6680;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.gd-mic:hover {
+  background: #e2dff0;
+}
+
+.gd-mic:active {
+  transform: scale(0.95);
+}
+
+.gd-mic--active {
+  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  color: #fff;
+  box-shadow: 0 0 0 rgba(240, 22, 158, 0.4);
+  animation: gd-mic-pulse 1.4s ease-out infinite;
+}
+
+@keyframes gd-mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(240, 22, 158, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(240, 22, 158, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(240, 22, 158, 0);
+  }
+}
+
+.gd-send {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(123, 47, 247, 0.35);
+  transition: transform 0.15s ease;
+}
+
+.gd-send:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.gd-send:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.gd-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+  box-shadow: none;
+}
+
+.gd-hint {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 10.5px;
+  color: #b3aec0;
+}
+
+/* ── 로딩 상태 ─────────────────────────────────────────────────────────────── */
+
+.gd-body--center {
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.gd-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #f0eef4;
+  border-top-color: #7b2ff7;
+  border-radius: 50%;
+  animation: gd-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes gd-spin {
+  to { transform: rotate(360deg); }
+}
+
+.gd-loading-text {
+  margin: 0;
+  font-size: 14px;
+  color: #7a768a;
+}
+
+/* ── 결과 상태 ─────────────────────────────────────────────────────────────── */
+
+.gd-body--result {
+  padding: 24px;
+  align-items: flex-start;
+  text-align: left;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.gd-result-reason {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #18122a;
+}
+
+.gd-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gd-step-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(240,22,158,0.06), rgba(123,47,247,0.06));
+  border-radius: 12px;
+}
+
+.gd-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f0169e, #7b2ff7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.gd-step-label {
+  font-size: 13px;
+  color: #2c2636;
+  line-height: 1.4;
+}
+
+/* 실제 페이지에서 해당 단계 요소를 클릭하면 완료 처리되어 흐려지고 취소선이 붙습니다 */
+.gd-step-item--done {
+  opacity: 0.7;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.gd-step-item--done .gd-step-num {
+  background: #22c55e;
+}
+
+.gd-step-item--done .gd-step-label {
+  text-decoration: line-through;
+  color: #5c6b63;
+}
+
+/* 다단계 안내의 모든 단계를 완료했을 때 크게 보여주는 완료 배너 */
+.gd-complete-banner {
+  box-sizing:     border-box;
+  width:          100%;
+  display:        flex;
+  flex-direction: column;
+  align-items:    center;
+  gap:            8px;
+  padding:        20px 14px;
+  border-radius:  14px;
+  background:     linear-gradient(135deg, rgba(34,197,94,0.10), rgba(34,197,94,0.04));
+  border:         1px solid rgba(34,197,94,0.25);
+  text-align:     center;
+}
+
+.gd-complete-banner__icon {
+  width:            40px;
+  height:           40px;
+  border-radius:    50%;
+  background:       #22c55e;
+  color:            #fff;
+  font-size:        22px;
+  font-weight:      700;
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+}
+
+.gd-complete-banner__text {
+  font-size:   15px;
+  font-weight: 700;
+  color:       #14532d;
+}
+
+.gd-found-badge {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(240,22,158,0.06), rgba(123,47,247,0.06));
+  border-left: 3px solid #7b2ff7;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c2636;
+  box-sizing: border-box;
+}
+
+.gd-not-found {
+  margin: 0;
+  font-size: 13px;
+  color: #9a95a8;
+  font-style: italic;
+}
+
+/* ── 에러 상태 ─────────────────────────────────────────────────────────────── */
+
+.gd-error-msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e11d48;
+}
+
+/* ── 공통 버튼 ─────────────────────────────────────────────────────────────── */
+
+.gd-reset-btn {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(123, 47, 247, 0.08);
+  border: 1px solid rgba(123, 47, 247, 0.22);
+  font-size: 14px;
+  font-weight: 700;
+  color: #7b2ff7;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.gd-reset-btn:hover {
+  background: rgba(123, 47, 247, 0.14);
+}
+
+.gd-reset-btn:active {
+  transform: scale(0.99);
+}
+
+.gd-reset-btn--error {
+  background: rgba(225, 29, 72, 0.08);
+  border-color: rgba(225, 29, 72, 0.22);
+  color: #e11d48;
+}
+
+.gd-reset-btn--error:hover {
+  background: rgba(225, 29, 72, 0.14);
+}
+
+.gd-reset-btn--error:hover {
+  box-shadow: 0 6px 18px rgba(225, 29, 72, 0.34);
+}
+
+/* ── 정보 찾음 상태 (type: found) ─────────────────────────────────────────── */
+
+.gd-info-box {
+  width: 100%;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(5, 150, 105, 0.05));
+  border-left: 3px solid #10b981;
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gd-info-box__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #059669;
+  letter-spacing: 0.3px;
+}
+
+.gd-info-box__text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #065f46;
+}

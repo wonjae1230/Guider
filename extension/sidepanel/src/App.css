@@ -1,25 +1,298 @@
+/* ─── 색상 변수 ─────────────────────────────────────────────────────────────── */
+
+:root {
+  --primary:        #6366f1;
+  --primary-hover:  #4f46e5;
+  --primary-bg:     rgba(99, 102, 241, 0.08);
+  --surface:        #ffffff;
+  --surface-sub:    #f9fafb;
+  --border:         #e5e7eb;
+  --text:           #111827;
+  --text-muted:     #6b7280;
+  --red:            #ef4444;
+  --red-bg:         #fef2f2;
+  --radius:         10px;
+  --radius-sm:      6px;
+}
+
+/* 다크모드 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface:     #1f2937;
+    --surface-sub: #111827;
+    --border:      #374151;
+    --text:        #f9fafb;
+    --text-muted:  #9ca3af;
+    --primary-bg:  rgba(99, 102, 241, 0.12);
+    --red-bg:      #1c0a0a;
+  }
+}
+
+/* ─── 앱 레이아웃 ────────────────────────────────────────────────────────────── */
+
 .app {
-  display: flex;
+  display:        flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-  min-height: 100vh;
-  box-sizing: border-box;
+  gap:            16px;
+  padding:        20px 16px;
+  min-height:     100vh;
+  background:     var(--surface-sub);
+  color:          var(--text);
 }
 
-.app__header h1 {
-  margin: 0 0 4px;
-  font-size: 20px;
+/* ─── 헤더 ───────────────────────────────────────────────────────────────────── */
+
+.header {
+  padding-bottom: 4px;
 }
 
-.app__header p {
-  margin: 0;
-  color: #666;
+.header__row {
+  display:      flex;
+  align-items:  center;
+  gap:          8px;
+  margin-bottom: 4px;
+}
+
+.header__icon {
+  width:       22px;
+  height:      22px;
+  color:       var(--primary);
+  flex-shrink: 0;
+}
+
+.header__title {
+  margin:         0;
+  font-size:      20px;
+  font-weight:    700;
+  letter-spacing: -0.3px;
+}
+
+.header__subtitle {
+  margin:    0;
   font-size: 13px;
+  color:     var(--text-muted);
 }
 
-.app__content {
-  display: flex;
+/* ─── 검색 폼 ────────────────────────────────────────────────────────────────── */
+
+.search-form {
+  display:        flex;
   flex-direction: column;
-  gap: 12px;
+  gap:            8px;
+}
+
+.search-form__input {
+  width:         100%;
+  padding:       10px 12px;
+  border:        1.5px solid var(--border);
+  border-radius: var(--radius);
+  background:    var(--surface);
+  color:         var(--text);
+  font-size:     14px;
+  font-family:   inherit;
+  line-height:   1.5;
+  resize:        none;
+  outline:       none;
+  transition:    border-color 0.15s;
+}
+
+.search-form__input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-form__input:focus {
+  border-color: var(--primary);
+}
+
+.search-form__input:disabled {
+  opacity: 0.6;
+  cursor:  not-allowed;
+}
+
+.search-form__button {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  gap:             8px;
+  padding:         10px;
+  background:      var(--primary);
+  color:           #fff;
+  border:          none;
+  border-radius:   var(--radius);
+  font-size:       14px;
+  font-weight:     600;
+  font-family:     inherit;
+  cursor:          pointer;
+  transition:      background 0.15s, opacity 0.15s;
+}
+
+.search-form__button:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.search-form__button:disabled {
+  opacity: 0.5;
+  cursor:  not-allowed;
+}
+
+/* ─── 스피너 ─────────────────────────────────────────────────────────────────── */
+
+.spinner {
+  display:       inline-block;
+  width:         16px;
+  height:        16px;
+  border:        2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  flex-shrink:   0;
+  animation:     spin 0.7s linear infinite;
+}
+
+/* 버튼 외부에서 쓰는 큰 스피너 (배경에 맞게 색 반전) */
+.spinner--lg {
+  width:            24px;
+  height:           24px;
+  border-color:     var(--border);
+  border-top-color: var(--primary);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── 공통 정보 카드 (로딩 / 에러) ──────────────────────────────────────────── */
+
+.info-card {
+  display:        flex;
+  flex-direction: column;
+  align-items:    center;
+  gap:            12px;
+  padding:        20px 16px;
+  border-radius:  var(--radius);
+  font-size:      14px;
+  text-align:     center;
+}
+
+.info-card--loading {
+  flex-direction:  row;
+  justify-content: center;
+  background:      var(--surface);
+  border:          1px solid var(--border);
+  color:           var(--text-muted);
+}
+
+.info-card--error {
+  background: var(--red-bg);
+  border:     1px solid rgba(239, 68, 68, 0.25);
+  color:      var(--red);
+}
+
+.info-card__message {
+  margin:      0;
+  font-size:   13px;
+  line-height: 1.5;
+}
+
+/* ─── 결과 카드 ──────────────────────────────────────────────────────────────── */
+
+.result-card {
+  display:        flex;
+  flex-direction: column;
+  gap:            14px;
+  padding:        16px;
+  background:     var(--surface);
+  border:         1px solid var(--border);
+  border-radius:  var(--radius);
+}
+
+.result-card__reason {
+  margin:      0;
+  font-size:   14px;
+  line-height: 1.6;
+}
+
+.result-card__not-found {
+  margin:     0;
+  font-size:  13px;
+  color:      var(--text-muted);
+  font-style: italic;
+}
+
+/* ─── 단계 목록 ──────────────────────────────────────────────────────────────── */
+
+.step-list {
+  margin:         0;
+  padding:        0;
+  list-style:     none;
+  display:        flex;
+  flex-direction: column;
+  gap:            8px;
+}
+
+.step-list__item {
+  display:       flex;
+  align-items:   center;
+  gap:           10px;
+  padding:       10px 12px;
+  background:    var(--primary-bg);
+  border-radius: var(--radius-sm);
+}
+
+.step-list__num {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           22px;
+  height:          22px;
+  background:      var(--primary);
+  color:           #fff;
+  border-radius:   50%;
+  font-size:       11px;
+  font-weight:     700;
+  flex-shrink:     0;
+}
+
+.step-list__label {
+  font-size:   13px;
+  line-height: 1.4;
+}
+
+/* ─── 단일 요소 배지 ─────────────────────────────────────────────────────────── */
+
+.found-badge {
+  padding:       8px 12px;
+  background:    var(--primary-bg);
+  border-left:   3px solid var(--primary);
+  border-radius: var(--radius-sm);
+  font-size:     13px;
+  font-weight:   500;
+}
+
+/* ─── 텍스트 버튼 (다시 질문하기 / 다시 시도) ───────────────────────────────── */
+
+.text-button {
+  align-self:    flex-start;
+  padding:       6px 12px;
+  background:    transparent;
+  color:         var(--primary);
+  border:        1.5px solid var(--primary);
+  border-radius: var(--radius-sm);
+  font-size:     13px;
+  font-weight:   500;
+  font-family:   inherit;
+  cursor:        pointer;
+  transition:    background 0.15s;
+}
+
+.text-button:hover {
+  background: var(--primary-bg);
+}
+
+.text-button--error {
+  color:        var(--red);
+  border-color: var(--red);
+}
+
+.text-button--error:hover {
+  background: var(--red-bg);
 }
