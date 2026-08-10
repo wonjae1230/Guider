@@ -15,3 +15,7 @@ dist/
 # Project artifacts
 조홍소백원자료.zip
 조홍소백원자료/
+
+# Playwright
+.playwright-mcp/
+gov24.png
