@@ -29,25 +29,27 @@ const MODEL = 'claude-sonnet-4-6';
 // ─── 시스템 프롬프트 ──────────────────────────────────────────────────────────
 // 모든 요청에서 동일하게 사용되므로 cache_control: ephemeral 지정
 // → Anthropic Prompt Caching이 활성화되어 반복 호출 시 비용·속도 개선
-const SYSTEM_PROMPT = `당신은 웹 페이지 AI 가이드 도우미입니다.
-사용자 질문, 페이지 구조(헤딩), 인터랙티브 DOM 요소 목록, 페이지 텍스트가 주어집니다.
-아래 JSON 형식으로만 응답하세요.
+const SYSTEM_PROMPT = `You are an AI guide assistant for web pages.
+You are given the user's question, page heading structure, a list of interactive DOM elements, and visible page text.
+Respond ONLY with the following JSON format — no other text.
 
-응답 형식:
-{"type":"navigate","anchors":[{"id":"요소id","ariaLabel":"aria-label값","text":"요소텍스트"}],"reason":"한국어 안내 메시지"}
+Response format:
+{"type":"navigate","anchors":[{"id":"element-id","ariaLabel":"aria-label value","text":"element text"}],"reason":"Korean guidance message"}
 
-type 값 규칙:
-- "navigate": 사용자가 클릭하거나 이동해야 하는 UI 요소를 찾은 경우. anchors에 해당 요소 포함.
-- "found": 페이지 텍스트에서 정보를 직접 읽어 답변 가능한 경우(예: 이메일, 학점, 이름). anchors는 []. reason에 찾은 정보를 직접 답변.
-- "notfound": 해당 기능이나 정보를 찾을 수 없는 경우. anchors는 []. reason에 이유 설명.
+Type rules:
+- "navigate": Found UI elements the user needs to click or navigate to. Include them in anchors.
+- "found": The answer can be read directly from page text (e.g. email, grade, name). Set anchors to []. Put the answer directly in reason.
+- "notfound": The feature or information cannot be found. Set anchors to []. Explain why in reason.
 
-공통 규칙:
-- anchors는 반드시 제공된 DOM 요소 목록에 있는 요소만 포함하세요
-- anchors는 최대 3개까지만 반환하세요 (여러 단계가 필요한 경우 순서대로 나열)
-- [숨겨진 메뉴] 표시 요소는 현재 보이지 않는 드롭다운·서브메뉴 항목입니다. 이 요소가 목적지라면 anchors에 상위 메뉴(visible)를 먼저, 해당 숨겨진 항목을 다음에 나열해 단계별로 안내하세요
-- 사용자 질문과 UI 레이블이 다른 경우(예: "학점" → "성적현황", "내 정보" → "마이페이지") 의미적으로 가장 가까운 요소를 선택하세요
-- 검색 기능 사용이나 외부 링크 이동은 절대 추천하지 마세요
-- JSON 외의 텍스트는 절대 출력하지 마세요`;
+Rules:
+- anchors must only contain elements that exist in the provided DOM element list
+- anchors may contain at most 3 elements; list them in order if multiple steps are needed
+- Elements marked [hidden menu] are currently invisible dropdown/submenu items. If such an element is the destination, put its visible parent menu first in anchors, then the hidden item.
+- Elements marked [hidden menu: click "X" first] require clicking X to reveal them. Put X first in anchors, then the target element.
+- When the user's question and UI labels differ (e.g. "grade" → "성적현황", "my info" → "마이페이지"), choose the semantically closest element.
+- Never recommend using a search function or navigating to an external link.
+- The "reason" field must always be written in Korean.
+- Output JSON only — absolutely no other text.`;
 
 // ─── 유틸 함수 ────────────────────────────────────────────────────────────────
 
@@ -61,7 +63,15 @@ type 값 규칙:
 function formatElements(elements) {
   return elements
     .map((el, i) => {
-      const note = el.hidden ? ' [숨겨진 메뉴]' : '';
+      let note = '';
+      if (el.visible === false) {
+        note = el.revealBy?.text
+          ? ` [hidden menu: click "${el.revealBy.text}" first]`
+          : ' [hidden menu]';
+      } else if (el.hidden) {
+        // 구버전 호환
+        note = ' [hidden menu]';
+      }
       return `${i + 1}. tag=${el.tag} id="${el.id}" aria-label="${el.ariaLabel}" role="${el.role}" text="${el.text}"${note}`;
     })
     .join('\n');
@@ -108,6 +118,10 @@ app.post('/api/query', async (req, res) => {
   }
 
   // ── 2단계: Claude API 호출 ─────────────────────────────────────────────────
+  console.log(`[쿼리] "${question}" | 요소 ${elements.length}개 | ${url.slice(0, 60)}`);
+  const gradeEl = elements.filter(el => el.text?.includes('성적') || el.text?.includes('grade'));
+  if (gradeEl.length) console.log('[성적 관련 요소]', gradeEl.map(e => e.text));
+
   let userMessage = `사용자 질문: ${question}\n\n`;
 
   // 페이지 헤딩 구조: AI가 페이지 섹션을 이해해 "학점 → 성적현황" 같은 의미 매핑을 잘 하도록 돕습니다.
@@ -125,7 +139,7 @@ app.post('/api/query', async (req, res) => {
   try {
     const response = await claude.messages.create({
       model:      MODEL,
-      max_tokens: 512,
+      max_tokens: 1024,
       system: [
         {
           type:          'text',
@@ -142,6 +156,7 @@ app.post('/api/query', async (req, res) => {
     // 모델이 간혹 ```json ... ``` 마크다운 블록으로 감싸는 경우를 제거합니다.
     const rawText   = response.content[0].text.trim();
     const jsonText  = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    console.log('[Claude 응답]', jsonText.slice(0, 200));
     const result    = JSON.parse(jsonText);
 
     // ── 3단계: 결과 Redis에 저장 ──────────────────────────────────────────────

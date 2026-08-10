@@ -181,8 +181,8 @@ export function extractElements(question = '') {
 
   addFromDoc(document, window);
 
-  // same-origin iframe 내부도 추출
-  for (const iframe of document.querySelectorAll('iframe')) {
+  // same-origin iframe/frame 내부도 추출 (classnet 등 JSP frameset 대응)
+  for (const iframe of document.querySelectorAll('iframe, frame')) {
     try {
       const iDoc = iframe.contentDocument;
       const iWin = iframe.contentWindow;
@@ -213,7 +213,7 @@ export function extractHeadings() {
   const headings = [];
   const docs = [document];
 
-  for (const iframe of document.querySelectorAll('iframe')) {
+  for (const iframe of document.querySelectorAll('iframe, frame')) {
     try {
       if (iframe.contentDocument) docs.push(iframe.contentDocument);
     } catch {}
@@ -242,7 +242,7 @@ export function extractPageText() {
 
   const parts = [getTextFromDoc(document)];
 
-  for (const iframe of document.querySelectorAll('iframe')) {
+  for (const iframe of document.querySelectorAll('iframe, frame')) {
     try {
       const iDoc = iframe.contentDocument;
       if (iDoc) parts.push(getTextFromDoc(iDoc));
@@ -343,6 +343,7 @@ function addHighlight(el, label) {
 // 숨겨진 요소의 DOM 트리를 올라가며 가시적이고 인터랙티브한 트리거 요소를 찾습니다.
 // 예: display:none 서브메뉴 항목 → 그것을 열어주는 상위 메뉴 버튼
 function findVisibleTrigger(hiddenEl) {
+  // 1단계: 부모 체인에서 인터랙티브 요소 탐색
   let current = hiddenEl.parentElement;
   while (current && current !== document.body) {
     if (isVisible(current)) {
@@ -352,6 +353,15 @@ function findVisibleTrigger(hiddenEl) {
     }
     current = current.parentElement;
   }
+
+  // 2단계: 폴백 — 숨긴 조상을 찾고 그 이전 형제에서 트리거 탐색
+  // classnet처럼 트리거가 <div>/<span>인 경우 대응
+  const hiddenAncestor = findHiddenAncestor(hiddenEl);
+  if (hiddenAncestor) {
+    const trigger = findRevealTrigger(hiddenAncestor);
+    if (trigger && isVisible(trigger)) return trigger;
+  }
+
   return null;
 }
 
@@ -386,6 +396,10 @@ function findElement(anchor) {
     // 4. 숨겨진 요소 — 마지막 폴백
     for (const el of candidates) {
       if ((el.innerText || el.value || '').trim() === anchor.text) return el;
+    }
+    // 5. div/span/li 등 비표준 클릭 요소 (classnet "성적정보" 같은 경우)
+    for (const el of document.querySelectorAll('div, span, li, td')) {
+      if (isVisible(el) && (el.innerText || '').trim() === anchor.text) return el;
     }
   }
   return null;
