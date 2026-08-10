@@ -22,15 +22,15 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 // ─── 모델 설정 ────────────────────────────────────────────────────────────────
-// claude-haiku-4-5: Claude 패밀리 중 가장 빠른 모델
-// 응답 속도 우선, 구조화된 JSON 출력 신뢰도 높음
-const MODEL = 'claude-haiku-4-5-20251001';
+// claude-sonnet-4-6: 정확도와 속도의 균형이 좋은 모델
+// 한국어 의미 이해, 복잡한 UI 판단, 다단계 네비게이션 추론에 haiku보다 우수합니다.
+const MODEL = 'claude-sonnet-4-6';
 
 // ─── 시스템 프롬프트 ──────────────────────────────────────────────────────────
 // 모든 요청에서 동일하게 사용되므로 cache_control: ephemeral 지정
 // → Anthropic Prompt Caching이 활성화되어 반복 호출 시 비용·속도 개선
 const SYSTEM_PROMPT = `당신은 웹 페이지 AI 가이드 도우미입니다.
-사용자 질문, 페이지의 인터랙티브 DOM 요소 목록, 그리고 페이지 텍스트가 주어집니다.
+사용자 질문, 페이지 구조(헤딩), 인터랙티브 DOM 요소 목록, 페이지 텍스트가 주어집니다.
 아래 JSON 형식으로만 응답하세요.
 
 응답 형식:
@@ -44,6 +44,8 @@ type 값 규칙:
 공통 규칙:
 - anchors는 반드시 제공된 DOM 요소 목록에 있는 요소만 포함하세요
 - anchors는 최대 3개까지만 반환하세요 (여러 단계가 필요한 경우 순서대로 나열)
+- [숨겨진 메뉴] 표시 요소는 현재 보이지 않는 드롭다운·서브메뉴 항목입니다. 이 요소가 목적지라면 anchors에 상위 메뉴(visible)를 먼저, 해당 숨겨진 항목을 다음에 나열해 단계별로 안내하세요
+- 사용자 질문과 UI 레이블이 다른 경우(예: "학점" → "성적현황", "내 정보" → "마이페이지") 의미적으로 가장 가까운 요소를 선택하세요
 - 검색 기능 사용이나 외부 링크 이동은 절대 추천하지 마세요
 - JSON 외의 텍스트는 절대 출력하지 마세요`;
 
@@ -58,10 +60,10 @@ type 값 규칙:
  */
 function formatElements(elements) {
   return elements
-    .map(
-      (el, i) =>
-        `${i + 1}. tag=${el.tag} id="${el.id}" aria-label="${el.ariaLabel}" role="${el.role}" text="${el.text}"`,
-    )
+    .map((el, i) => {
+      const note = el.hidden ? ' [숨겨진 메뉴]' : '';
+      return `${i + 1}. tag=${el.tag} id="${el.id}" aria-label="${el.ariaLabel}" role="${el.role}" text="${el.text}"${note}`;
+    })
     .join('\n');
 }
 
@@ -80,7 +82,7 @@ function formatElements(elements) {
  *  5. 결과 반환
  */
 app.post('/api/query', async (req, res) => {
-  const { question, elements, url, pageText = '' } = req.body;
+  const { question, elements, url, pageText = '', headings = [] } = req.body;
 
   // 필수 파라미터 누락 검사
   if (!question || !elements || !url) {
@@ -106,10 +108,18 @@ app.post('/api/query', async (req, res) => {
   }
 
   // ── 2단계: Claude API 호출 ─────────────────────────────────────────────────
-  // pageText가 있으면 정보 조회 질문(학점, 이름 등)에도 답할 수 있도록 함께 전달
-  let userMessage = `사용자 질문: ${question}\n\nDOM 요소 목록:\n${formatElements(elements)}`;
+  let userMessage = `사용자 질문: ${question}\n\n`;
+
+  // 페이지 헤딩 구조: AI가 페이지 섹션을 이해해 "학점 → 성적현황" 같은 의미 매핑을 잘 하도록 돕습니다.
+  if (headings.length > 0) {
+    userMessage += `페이지 구조:\n${headings.join('\n')}\n\n`;
+  }
+
+  userMessage += `인터랙티브 요소 목록:\n${formatElements(elements)}`;
+
+  // 페이지 텍스트: 이미 화면에 표시된 정보(학점, 이메일 등) 조회 질문 대응
   if (pageText) {
-    userMessage += `\n\n페이지 텍스트 (이미 화면에 표시된 정보):\n${pageText}`;
+    userMessage += `\n\n페이지 텍스트 (현재 화면에 표시된 정보):\n${pageText}`;
   }
 
   try {
