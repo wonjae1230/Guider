@@ -121,8 +121,10 @@ app.post('/api/query', async (req, res) => {
     });
 
     // Claude가 반환한 텍스트를 JSON으로 파싱
-    const rawText = response.content[0].text.trim();
-    const result  = JSON.parse(rawText);
+    // 모델이 간혹 ```json ... ``` 마크다운 블록으로 감싸는 경우를 제거합니다.
+    const rawText   = response.content[0].text.trim();
+    const jsonText  = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const result    = JSON.parse(jsonText);
 
     // ── 3단계: 결과 Redis에 저장 ──────────────────────────────────────────────
     try {
