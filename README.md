@@ -2,6 +2,13 @@
 
 웹 페이지 사용법을 AI가 안내해주는 크롬 익스텐션입니다.  
 사용자가 질문을 입력하면 현재 페이지의 DOM을 분석해 클릭해야 할 요소를 찾아 하이라이트로 안내합니다.
+<img width="796" height="402" alt="image" src="https://github.com/user-attachments/assets/ba38e43b-ddfd-478e-a41c-7695a72ee9a8" />
+
+
+<img width="1913" height="1047" alt="image" src="https://github.com/user-attachments/assets/a8e54819-8c26-4b82-92f1-2323dc0f26b8" />
+<img width="1900" height="1022" alt="image" src="https://github.com/user-attachments/assets/281f5467-3687-4faa-8573-188296650012" />
+
+
 
 ---
 
