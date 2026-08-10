@@ -5,10 +5,12 @@
 // URL은 window.location.href로 직접 가져오고, DOM도 document에 직접 접근합니다.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BACKEND_URL     = 'http://localhost:3000';
+const BACKEND_URL    = 'http://localhost:3000';
 const HIGHLIGHT_CLASS = 'guider-hl';
 const TOOLTIP_CLASS   = 'guider-tt';
-const HL_COLOR        = '#7b2ff7';
+
+// 하이라이트 색상: 위젯 브랜드 컬러(보라)와 통일
+const HL_COLOR = '#7b2ff7';
 
 // ─── 민감정보 마스킹 ──────────────────────────────────────────────────────────
 
@@ -29,7 +31,10 @@ function maskText(text) {
 
 // ─── 가시성 체크 ──────────────────────────────────────────────────────────────
 
-// iframe 요소는 해당 iframe의 contentWindow를 넘겨야 올바른 스타일을 가져옵니다.
+// isVisible: 특정 window 컨텍스트에서 요소 표시 여부 확인
+// iframe 요소는 iframe 자신의 contentWindow를 넘겨야 올바른 스타일을 가져옵니다.
+// false를 반환하면(=완전히 숨겨짐) findHiddenAncestor()/findRevealTrigger()로
+// "어떤 트리거를 먼저 클릭해야 이게 나타나는지"를 별도로 추정합니다.
 function isVisible(el, win = window) {
   try {
     const s = win.getComputedStyle(el);
@@ -40,13 +45,68 @@ function isVisible(el, win = window) {
       el.offsetParent !== null
     );
   } catch {
-    return true;
+    return true; // 확인 불가 시 포함(크로스오리진 등)
   }
 }
 
-// ─── 선택자 ───────────────────────────────────────────────────────────────────
+/**
+ * el부터 조상 체인을 걸어 올라가며, el을 화면에서 감춘 조상(있다면)을 찾습니다.
+ * "성적정보" 메뉴처럼 <ul style="display:none">으로 접는 경우뿐 아니라
+ * max-height:0/overflow:hidden 방식도 함께 감지합니다.
+ *
+ * 주의: isVisible()의 offsetParent 체크는 el 자신에게 display:none 조상이
+ * 있으면 이미 false를 반환하므로, 이 함수는 그 "숨긴 조상 요소 자체"를
+ * 찾아 반환하는 역할입니다(트리거를 찾기 위해 어디서부터 형제를 뒤질지 알아야 함).
+ */
+function findHiddenAncestor(el, win = window) {
+  let node  = el.parentElement;
+  let depth = 0;
 
-// 일반 인터랙티브 요소 선택자
+  while (node && depth < 10) {
+    let style;
+    try {
+      style = win.getComputedStyle(node);
+    } catch {
+      break;
+    }
+
+    const displayHidden = style.display === 'none' || style.visibility === 'hidden';
+    const clips = /hidden|clip/.test(style.overflow) || /hidden|clip/.test(style.overflowY);
+    const zeroSize = clips && (() => {
+      const r = node.getBoundingClientRect();
+      return r.height <= 1 || r.width <= 1;
+    })();
+
+    if (displayHidden || zeroSize) return node;
+
+    node  = node.parentElement;
+    depth++;
+  }
+
+  return null;
+}
+
+/**
+ * 숨겨진 컨테이너(hiddenContainer)를 펼치는 트리거로 추정되는 요소를 찾습니다.
+ * "성적정보"처럼 트리거가 <a>/<button>이 아니라 그냥 <div>인 경우가 많아,
+ * INTERACTIVE_SELECTOR로 제한하지 않고 "보이고 텍스트가 있는" 형제를 찾습니다.
+ */
+function findRevealTrigger(hiddenContainer, win = window) {
+  let sib = hiddenContainer.previousElementSibling;
+  while (sib) {
+    if (isVisible(sib, win)) {
+      const text = (sib.innerText || sib.textContent || '').trim();
+      if (text) return sib;
+      const inner = Array.from(sib.querySelectorAll('*')).find(
+        (c) => isVisible(c, win) && (c.innerText || c.textContent || '').trim(),
+      );
+      if (inner) return inner;
+    }
+    sib = sib.previousElementSibling;
+  }
+  return null;
+}
+
 const INTERACTIVE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
@@ -57,152 +117,173 @@ const INTERACTIVE_SELECTOR = [
   '[role="link"]',
   '[role="menuitem"]',
   '[role="tab"]',
+  // tabindex="0": 코레일처럼 div/span으로 만든 커스텀 인터랙티브 요소 포함
   '[tabindex="0"]:not(body)',
 ].join(', ');
 
-// 네비게이션 전용 선택자 - 숨겨진 드롭다운·서브메뉴도 포함하기 위해 별도로 관리
-// 한국 사이트에서 자주 쓰이는 .gnb, .lnb, .snb, .depth 등의 클래스 패턴을 포함합니다.
-const NAV_SELECTOR = [
-  'nav a', 'nav button',
-  '[role="navigation"] a', '[role="navigation"] button',
-  'header a', 'header button',
-  '[class*="gnb"] a', '[class*="gnb"] button',
-  '[class*="lnb"] a', '[class*="lnb"] button',
-  '[class*="snb"] a', '[class*="snb"] button',
-  '[class*="depth"] a', '[class*="depth"] button',
-  '[class*="menu"] a', '[class*="menu"] button',
-  '[class*="nav"] a',  '[class*="nav"] button',
-  '[id*="gnb"] a',    '[id*="gnb"] button',
-  '[id*="lnb"] a',    '[id*="lnb"] button',
-  '[id*="menu"] a',   '[id*="menu"] button',
-  '[id*="nav"] a',    '[id*="nav"] button',
-].join(', ');
+// 단일 document에서 인터랙티브 요소를 최대 limit개 추출합니다.
+function extractFromDoc(doc, win, limit = 100) {
+  const nodes    = doc.querySelectorAll(INTERACTIVE_SELECTOR);
+  const elements = [];
 
-// ─── 키워드 추출 및 관련도 점수 ───────────────────────────────────────────────
+  for (const node of nodes) {
+    if (node.getAttribute('type') === 'password') continue;
 
-const STOP_WORDS = new Set([
-  // 조사
-  '이', '가', '을', '를', '은', '는', '의', '에', '서', '로', '와', '과', '도', '만',
-  '에서', '으로', '한테', '에게', '부터', '까지',
-  // 접속사
-  '그리고', '하지만', '그런데', '그래서', '또한', '그러면', '그러나',
-  // 흔한 동사·형용사 어미
-  '싶어', '싶은데', '있어', '없어', '해줘', '해주세요', '알려줘', '봐줘',
-  '보고', '찾아', '알고싶어', '궁금해', '궁금한데', '하면', '되는', '있나요', '있어요',
-  // 의문사
-  '어떻게', '어디서', '어디', '뭐야', '뭐', '어떤', '무엇', '언제', '어때',
-]);
+    // 성적정보 > 금학기성적조회처럼 <ul style="display:none">에 감춰진 요소는
+    // isVisible()이 false를 반환해 예전엔 통째로 제외됐습니다. 지금은 제외하지 않고,
+    // 대신 "펼치는 트리거"를 찾아 revealBy로 같이 담아 AI가 2단계로 안내할 수 있게 합니다.
+    const visible = isVisible(node, win);
+    let revealBy  = null;
 
-function extractKeywords(question) {
-  return question
-    .replace(/[^\w\s가-힣]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 2 && !STOP_WORDS.has(w));
-}
+    if (!visible) {
+      const hiddenAncestor = findHiddenAncestor(node, win);
+      const trigger = hiddenAncestor ? findRevealTrigger(hiddenAncestor, win) : null;
+      if (!trigger) continue; // 트리거조차 못 찾으면 안내가 불가능하므로 제외
 
-// 키워드와 요소의 관련도 점수화
-// 양방향 포함 체크: 키워드가 요소 텍스트를 포함하거나, 요소 텍스트가 키워드를 포함
-// 예) 키워드 "로그인하려면" → 요소 "로그인" 매칭 (kwLow.includes(word))
-//     키워드 "학점"        → 요소 "학점조회" 매칭 (word.includes(kwLow))
-function scoreElement(el, keywords) {
-  if (!keywords.length) return 0;
-  const words = `${el.text} ${el.ariaLabel} ${el.id}`
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(w => w.length >= 2);
-  let score = 0;
-  for (const kw of keywords) {
-    const kwLow = kw.toLowerCase();
-    for (const word of words) {
-      if (word.includes(kwLow) || kwLow.includes(word)) {
-        score += 1;
-        break; // 같은 키워드로 중복 점수 방지
-      }
+      const triggerText = (trigger.innerText || trigger.value || trigger.textContent || '').trim();
+      revealBy = {
+        id:        trigger.id                         || '',
+        ariaLabel: maskText(trigger.getAttribute('aria-label')),
+        text:      maskText(triggerText.slice(0, 100)),
+      };
     }
+
+    const rawText = (node.innerText || node.value || node.textContent || '')
+      .trim()
+      .replace(/\s+/g, ' ');
+
+    elements.push({
+      tag:       node.tagName.toLowerCase(),
+      id:        node.id                         || '',
+      ariaLabel: maskText(node.getAttribute('aria-label')),
+      role:      node.getAttribute('role')       || '',
+      text:      maskText(rawText.slice(0, 100)),
+      type:      node.getAttribute('type')       || '',
+      visible,
+      revealBy,
+    });
+
+    if (elements.length >= limit) break;
   }
-  return score;
+
+  return elements;
 }
 
-// ─── DOM 요소 추출 ────────────────────────────────────────────────────────────
+// 클래스넷처럼 iframe 안에 또 iframe(header/menu/main/footer 등 프레임셋)이
+// 중첩된 구조를 감안해, 몇 단계까지 파고들지 정하는 상한선입니다.
+const MAX_FRAME_DEPTH = 4;
 
-function nodeToElement(node, hidden = false) {
-  const rawText = (node.innerText || node.value || node.textContent || '')
-    .trim()
-    .replace(/\s+/g, ' ');
-  return {
-    tag:       node.tagName.toLowerCase(),
-    id:        node.id                       || '',
-    ariaLabel: maskText(node.getAttribute('aria-label')),
-    role:      node.getAttribute('role')     || '',
-    text:      maskText(rawText.slice(0, 100)),
-    type:      node.getAttribute('type')     || '',
-    hidden,     // true이면 현재 화면에 보이지 않는 숨겨진 메뉴 항목
-  };
+/**
+ * same-origin iframe들을 재귀적으로 아직 로딩 중이면 완료(또는 타임아웃)까지 기다립니다.
+ *
+ * iframe.contentDocument는 same-origin이면 로딩 중에도 항상 접근되므로,
+ * readyState를 확인하지 않으면 frame.jsp처럼 콘텐츠가 늦게 채워지는
+ * 구형 JSP 포털에서 아직 비어있는 문서를 그대로 읽어 빈 배열을 반환하게 됩니다.
+ * (PR #10 자동 재실행 이후 바로 추출이 실행될 때 특히 잘 발생합니다.)
+ *
+ * frame.jsp 자체가 header/menu/main/footer 같은 하위 iframe을 또 담은
+ * 프레임셋인 경우가 있어, 로드가 끝난 iframe 안으로도 재귀적으로 들어갑니다.
+ */
+export async function waitForIframesReady(root = document, timeoutMs = 2000, depth = 0) {
+  if (depth >= MAX_FRAME_DEPTH) return;
+
+  // <frame>은 <frameset> 기반 구형 페이지에서 쓰이는 태그로, <iframe>과 별개 셀렉터가 필요합니다.
+  const iframes = Array.from(root.querySelectorAll('iframe, frame'));
+
+  await Promise.all(
+    iframes.map(async (iframe) => {
+      let doc;
+      try {
+        doc = iframe.contentDocument;
+      } catch {
+        return; // cross-origin: 기다릴 수 없으니 바로 진행
+      }
+      if (!doc) return;
+
+      if (doc.readyState !== 'complete') {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, timeoutMs);
+          iframe.addEventListener('load', () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+        try {
+          doc = iframe.contentDocument; // load 이후 문서가 교체됐을 수 있어 다시 조회
+        } catch {
+          return;
+        }
+      }
+
+      if (doc) await waitForIframesReady(doc, timeoutMs, depth + 1);
+    }),
+  );
 }
 
 /**
- * 현재 페이지(+ same-origin iframe)의 인터랙티브 요소를 추출합니다.
+ * root 문서와 그 안에 중첩된 모든 same-origin iframe 문서를 재귀적으로 모읍니다.
+ * cross-origin iframe은 SecurityError로 접근이 막히므로 건너뜁니다.
  *
- * 개선 사항:
- *  1. 키워드 관련도 순 정렬: 질문과 관련 있는 요소가 항상 앞에 배치됩니다.
- *  2. 숨겨진 네비게이션 포함: 드롭다운·서브메뉴 등 isVisible 체크를 통과 못 하는
- *     nav/menu 영역 요소도 [숨겨진 메뉴]로 표시하여 AI에 전달합니다.
- *  3. same-origin iframe 지원: 구형 포털(대학 사이트 등) 대응.
+ * chain: top부터 이 문서까지 거쳐온 iframe/frame 요소 목록.
+ * 하이라이트 시 중첩 프레임 안 요소의 화면 좌표(top 뷰포트 기준)를 계산하는 데 필요합니다.
  */
-export function extractElements(question = '') {
-  const keywords = extractKeywords(question);
-  const seen     = new Set();
-  const elements = [];
+function collectFrameDocs(doc, win, depth = 0, path = 'top', chain = [], acc = []) {
+  acc.push({ doc, win, path, chain });
+  console.log(`[Guider] 프레임 방문: ${path} (depth=${depth}, readyState=${doc.readyState})`);
 
-  function makeKey(node) {
-    return `${node.tagName}|${node.id}|${(node.innerText || node.value || '').slice(0, 40)}`;
-  }
+  if (depth >= MAX_FRAME_DEPTH) return acc;
 
-  function addFromDoc(doc, win) {
-    // 1단계: nav/메뉴 영역 - 숨겨진 것도 포함
-    for (const node of doc.querySelectorAll(NAV_SELECTOR)) {
-      if (node.getAttribute('type') === 'password') continue;
-      const key = makeKey(node);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      elements.push(nodeToElement(node, !isVisible(node, win)));
-    }
-
-    // 2단계: 일반 가시적 인터랙티브 요소
-    for (const node of doc.querySelectorAll(INTERACTIVE_SELECTOR)) {
-      if (!isVisible(node, win))                    continue;
-      if (node.getAttribute('type') === 'password') continue;
-      const key = makeKey(node);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      elements.push(nodeToElement(node, false));
-    }
-  }
-
-  addFromDoc(document, window);
-
-  // same-origin iframe/frame 내부도 추출 (classnet 등 JSP frameset 대응)
-  for (const iframe of document.querySelectorAll('iframe, frame')) {
+  // <frame>은 <frameset> 기반 구형 페이지(클래스넷 등)에서 쓰이는 태그로, <iframe>과 별개 셀렉터가 필요합니다.
+  for (const iframe of doc.querySelectorAll('iframe, frame')) {
     try {
       const iDoc = iframe.contentDocument;
       const iWin = iframe.contentWindow;
-      if (iDoc && iWin) addFromDoc(iDoc, iWin);
-    } catch {
-      // cross-origin SecurityError 무시
+      if (!iDoc || !iWin) {
+        console.log(`[Guider] ${iframe.tagName} contentDocument 없음 (${path}):`, iframe.src);
+        continue;
+      }
+      collectFrameDocs(
+        iDoc, iWin, depth + 1,
+        `${path} > ${iframe.name || iframe.src || iframe.tagName.toLowerCase()}`,
+        [...chain, iframe], acc,
+      );
+    } catch (err) {
+      console.log(`[Guider] ${iframe.tagName} 접근 실패(교차 출처 등, ${path}):`, iframe.src, err.message);
     }
   }
 
-  // 관련도 점수 기준 정렬
-  // 높은 점수 → 가시적 요소 → 숨겨진 메뉴 순
-  elements.sort((a, b) => {
-    const sA = scoreElement(a, keywords);
-    const sB = scoreElement(b, keywords);
-    if (sA !== sB) return sB - sA;
-    if (a.hidden !== b.hidden) return a.hidden ? 1 : -1;
-    return 0;
-  });
+  return acc;
+}
 
-  return elements.slice(0, 150);
+/**
+ * 현재 페이지(+ 중첩된 same-origin iframe 전체)의 인터랙티브 요소를 추출합니다.
+ * 구형 대학 포털처럼 iframe(심지어 iframe 안의 iframe) 기반 구조도 지원합니다.
+ *
+ * extractElements/extractPageText 호출 전에 waitForIframesReady()로
+ * iframe 로딩을 기다려야 콘텐츠가 채워진 상태를 읽을 수 있습니다.
+ */
+export function extractElements() {
+  const frames = collectFrameDocs(document, window);
+  const elements = [];
+
+  for (const { doc, win, path } of frames) {
+    if (elements.length >= 100) break;
+    const found = extractFromDoc(doc, win, 100 - elements.length);
+    if (found.length > 0) {
+      console.log(`[Guider] 요소 추출 (${path}):`, found.length, '개');
+    }
+    elements.push(...found);
+  }
+
+  // 접힌 것으로 판단된 요소와, 그 트리거 추정 결과를 별도로 확인할 수 있게 로그
+  const hidden = elements.filter((e) => e.visible === false);
+  if (hidden.length > 0) {
+    console.log('[Guider] 접힘(visible=false)으로 판단된 요소:', hidden);
+  } else {
+    console.log('[Guider] 접힘으로 판단된 요소 없음 (전부 visible=true로 추출됨)');
+  }
+
+  return elements;
 }
 
 /**
@@ -211,15 +292,9 @@ export function extractElements(question = '') {
  */
 export function extractHeadings() {
   const headings = [];
-  const docs = [document];
+  const frames = collectFrameDocs(document, window);
 
-  for (const iframe of document.querySelectorAll('iframe, frame')) {
-    try {
-      if (iframe.contentDocument) docs.push(iframe.contentDocument);
-    } catch {}
-  }
-
-  for (const doc of docs) {
+  for (const { doc } of frames) {
     for (const el of doc.querySelectorAll('h1, h2, h3')) {
       const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
       if (text) headings.push(`${el.tagName}: ${text.slice(0, 80)}`);
@@ -230,24 +305,26 @@ export function extractHeadings() {
 }
 
 /**
- * 페이지 텍스트를 추출합니다.
- * 이미 화면에 표시된 정보(학점, 이메일 등)를 AI가 직접 읽어 답할 수 있게 합니다.
+ * 현재 페이지(+ 중첩된 same-origin iframe 전체)의 가시 텍스트를 추출합니다.
+ * "총 학점이 몇 점이야?" 같은 정보 조회 질문에 답하기 위해 사용됩니다.
+ * 최대 3000자로 잘라 토큰 낭비를 방지합니다.
  */
 export function extractPageText() {
   function getTextFromDoc(doc) {
+    // 핵심 콘텐츠 영역 우선, 없으면 body 전체
     const area = doc.querySelector('main, #content, .content, #main, table') || doc.body;
     if (!area) return '';
-    return maskText((area.innerText || area.textContent || '').replace(/\s+/g, ' ').trim());
+    return maskText(
+      (area.innerText || area.textContent || '').replace(/\s+/g, ' ').trim(),
+    );
   }
 
-  const parts = [getTextFromDoc(document)];
-
-  for (const iframe of document.querySelectorAll('iframe, frame')) {
-    try {
-      const iDoc = iframe.contentDocument;
-      if (iDoc) parts.push(getTextFromDoc(iDoc));
-    } catch {}
-  }
+  const frames = collectFrameDocs(document, window);
+  const parts = frames.map(({ doc, path }) => {
+    const text = getTextFromDoc(doc);
+    console.log(`[Guider] 텍스트 추출 (${path}):`, text.length, '자');
+    return text;
+  });
 
   return parts.join('\n').slice(0, 3000);
 }
@@ -289,14 +366,15 @@ export async function callAI(question, elements, pageText = '', headings = []) {
 }
 
 // ─── 하이라이트 ───────────────────────────────────────────────────────────────
+// extractElements와 마찬가지로 anchor가 top이 아니라 중첩된 frame/iframe 안의
+// 요소를 가리킬 수 있으므로, 하이라이트도 collectFrameDocs로 모든 프레임을 뒤집니다.
 
-// 활성 MutationObserver 목록 — clearHighlights 호출 시 일괄 해제
-const _activeObservers = [];
+const BADGE_CLASS = 'guider-badge';
 
-function ensureHighlightStyles() {
-  if (document.getElementById('guider-hl-styles')) return;
+function ensureHighlightStyles(doc) {
+  if (doc.getElementById('guider-hl-styles')) return;
 
-  const style = document.createElement('style');
+  const style = doc.createElement('style');
   style.id    = 'guider-hl-styles';
   style.textContent = `
     .${HIGHLIGHT_CLASS} {
@@ -306,7 +384,7 @@ function ensureHighlightStyles() {
       transition: outline 0.15s ease !important;
     }
     .${TOOLTIP_CLASS} {
-      position:      absolute;
+      position:      fixed;
       background:    ${HL_COLOR};
       color:         #fff;
       padding:       4px 10px;
@@ -319,155 +397,204 @@ function ensureHighlightStyles() {
       pointer-events: none;
       box-shadow:    0 2px 8px rgba(0,0,0,0.15);
     }
-  `;
-  document.head.appendChild(style);
-}
-
-// 요소에 하이라이트 클래스와 툴팁을 추가합니다.
-function addHighlight(el, label) {
-  el.classList.add(HIGHLIGHT_CLASS);
-
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return; // 실제 크기 없으면 툴팁 생략
-
-  const tooltip = document.createElement('div');
-  tooltip.className   = TOOLTIP_CLASS;
-  tooltip.textContent = label;
-  const scrollY = window.scrollY ?? window.pageYOffset ?? 0;
-  const scrollX = window.scrollX ?? window.pageXOffset ?? 0;
-  tooltip.style.top   = rect.top > 40 ? `${rect.top + scrollY - 32}px` : `${rect.bottom + scrollY + 6}px`;
-  tooltip.style.left  = `${rect.left + scrollX}px`;
-  document.body.appendChild(tooltip);
-}
-
-// 숨겨진 요소의 DOM 트리를 올라가며 가시적이고 인터랙티브한 트리거 요소를 찾습니다.
-// 예: display:none 서브메뉴 항목 → 그것을 열어주는 상위 메뉴 버튼
-function findVisibleTrigger(hiddenEl) {
-  // 1단계: 부모 체인에서 인터랙티브 요소 탐색
-  let current = hiddenEl.parentElement;
-  while (current && current !== document.body) {
-    if (isVisible(current)) {
-      if (current.matches('a, button, [role="button"], [tabindex]')) return current;
-      const child = current.querySelector('a, button, [role="button"]');
-      if (child && isVisible(child)) return child;
+    .${BADGE_CLASS} {
+      position:        fixed;
+      width:           20px;
+      height:          20px;
+      border-radius:   50%;
+      background:      ${HL_COLOR};
+      color:            #fff;
+      font-size:        12px;
+      font-weight:      700;
+      font-family:      -apple-system, BlinkMacSystemFont, sans-serif;
+      display:          flex;
+      align-items:      center;
+      justify-content:  center;
+      z-index:          2147483647;
+      pointer-events:   none;
+      box-shadow:       0 1px 4px rgba(0,0,0,0.35);
+      border:           2px solid #fff;
     }
-    current = current.parentElement;
-  }
-
-  // 2단계: 폴백 — 숨긴 조상을 찾고 그 이전 형제에서 트리거 탐색
-  // classnet처럼 트리거가 <div>/<span>인 경우 대응
-  const hiddenAncestor = findHiddenAncestor(hiddenEl);
-  if (hiddenAncestor) {
-    const trigger = findRevealTrigger(hiddenAncestor);
-    if (trigger && isVisible(trigger)) return trigger;
-  }
-
-  return null;
+  `;
+  doc.head.appendChild(style);
 }
 
-function findElement(anchor) {
-  const CANDIDATES = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]';
-
+function findElementInDoc(doc, anchor) {
   if (anchor.id) {
-    const el = document.getElementById(anchor.id);
+    const el = doc.getElementById(anchor.id);
     if (el) return el;
   }
   if (anchor.ariaLabel) {
-    const el = document.querySelector(`[aria-label="${CSS.escape(anchor.ariaLabel)}"]`);
+    const el = doc.querySelector(`[aria-label="${CSS.escape(anchor.ariaLabel)}"]`);
     if (el) return el;
   }
   if (anchor.text) {
-    const candidates = [...document.querySelectorAll(CANDIDATES)];
-    // 1. 가시적 요소 — 정확히 일치
-    for (const el of candidates) {
-      if (isVisible(el) && (el.innerText || el.value || '').trim() === anchor.text) return el;
-    }
-    // 2. 가시적 요소 — 포함 관계
-    for (const el of candidates) {
-      if (!isVisible(el)) continue;
-      const t = (el.innerText || el.value || '').trim();
-      if (t && anchor.text.includes(t)) return el;
-    }
-    // 3. 숨겨진 요소 중 트리거가 있는 것 우선 (모바일 메뉴처럼 트리거가 없는 요소보다 데스크톱 드롭다운 선호)
-    for (const el of candidates) {
-      const t = (el.innerText || el.value || '').trim();
-      if (t === anchor.text && !isVisible(el) && findVisibleTrigger(el) !== null) return el;
-    }
-    // 4. 숨겨진 요소 — 마지막 폴백
+    const candidates = doc.querySelectorAll(
+      'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]',
+    );
+    // 1. 표준 인터랙티브 요소 — 정확히 일치
     for (const el of candidates) {
       if ((el.innerText || el.value || '').trim() === anchor.text) return el;
     }
-    // 5. div/span/li 등 비표준 클릭 요소 (classnet "성적정보" 같은 경우)
-    for (const el of document.querySelectorAll('div, span, li, td')) {
-      if (isVisible(el) && (el.innerText || '').trim() === anchor.text) return el;
+    // 2. 표준 인터랙티브 요소 — 부분 포함
+    for (const el of candidates) {
+      const t = (el.innerText || el.value || '').trim();
+      if (t && anchor.text.includes(t)) return el;
+    }
+    // 3. 비표준 클릭 요소(div/li 아코디언 트리거 등) — 직접 텍스트만 가진 leaf 요소로 제한
+    const broad = doc.querySelectorAll('div, li, span, dt, th, td');
+    for (const el of broad) {
+      if (el.children.length === 0 && (el.innerText || el.textContent || '').trim() === anchor.text) {
+        return el;
+      }
     }
   }
   return null;
 }
 
 /**
- * anchors 배열의 각 요소를 탐색해 하이라이트하고 툴팁을 표시합니다.
- *
- * 가시적 요소: 바로 하이라이트합니다.
- * 숨겨진 요소(드롭다운 등): 상위 트리거를 먼저 하이라이트하고,
- *   MutationObserver로 요소가 보이기 시작하면 자동으로 하이라이트를 전환합니다.
+ * anchor가 가리키는 요소를 top 문서부터 모든 중첩 프레임까지 뒤져서 찾습니다.
+ * 찾으면 { el, doc, chain }을 반환합니다. chain은 top → 이 요소가 속한 프레임까지의
+ * iframe/frame 요소 목록으로, 화면 좌표 변환에 사용됩니다.
  */
-export function highlightAnchors(anchors) {
-  clearHighlights();
-  ensureHighlightStyles();
-
-  let scrollTarget = null;
-
-  anchors.forEach((anchor, i) => {
-    const el = findElement(anchor);
-    if (!el) return;
-
-    const label = anchors.length > 1 ? `Step ${i + 1}` : '여기를 찾아보세요';
-
-    if (isVisible(el)) {
-      addHighlight(el, label);
-      if (!scrollTarget) scrollTarget = el;
-    } else {
-      // 숨겨진 요소: 상위 트리거를 먼저 하이라이트
-      const trigger = findVisibleTrigger(el);
-      if (trigger) {
-        addHighlight(trigger, label);
-        if (!scrollTarget) scrollTarget = trigger;
-      }
-
-      // 요소가 보이기 시작하면 트리거 → 실제 요소로 하이라이트 전환
-      const obs = new MutationObserver(() => {
-        if (!isVisible(el)) return;
-        obs.disconnect();
-        if (trigger) trigger.classList.remove(HIGHLIGHT_CLASS);
-        document.querySelectorAll(`.${TOOLTIP_CLASS}`).forEach(t => t.remove());
-        addHighlight(el, label);
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-
-      obs.observe(document.body, {
-        attributes:      true,
-        subtree:         true,
-        attributeFilter: ['style', 'class'],
-      });
-
-      _activeObservers.push(obs);
-      setTimeout(() => obs.disconnect(), 30_000); // 30초 후 자동 해제
-    }
-  });
-
-  scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+function findElement(anchor) {
+  for (const { doc, chain } of collectFrameDocs(document, window)) {
+    const el = findElementInDoc(doc, anchor);
+    if (el) return { el, doc, chain };
+  }
+  return null;
 }
 
 /**
- * 모든 하이라이트, 툴팁, MutationObserver를 제거합니다.
+ * 중첩 프레임 안 요소의 getBoundingClientRect()는 그 프레임 자신의 뷰포트 기준이므로,
+ * chain에 있는 iframe/frame들의 위치를 top까지 누적해서 top 뷰포트 기준 좌표로 변환합니다.
+ */
+function getAbsoluteRect(el, chain) {
+  const rect = el.getBoundingClientRect();
+  let top    = rect.top;
+  let left   = rect.left;
+
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const frameRect = chain[i].getBoundingClientRect();
+    top  += frameRect.top;
+    left += frameRect.left;
+  }
+
+  return { top, left, bottom: top + rect.height };
+}
+
+/**
+ * 요소 하나에 배지/툴팁을 그립니다. 요소가 아직 (접힌 아코디언 등으로) 렌더링
+ * 안 된 상태면(getBoundingClientRect가 0,0,0,0) 아무것도 그리지 않고 null을 반환합니다.
+ * 반환값의 tooltip/badge는 나중에 removeStepMarkers에서 정확히 이 요소 것만 지우는 데 씁니다.
+ */
+function drawStepMarkers(el, doc, chain, i, multiStep) {
+  ensureHighlightStyles(doc); // 요소가 속한 프레임의 document에도 주입 (.guider-hl 적용용)
+  el.classList.add(HIGHLIGHT_CLASS);
+
+  const localRect = el.getBoundingClientRect();
+  if (localRect.width === 0 && localRect.height === 0) {
+    return null; // 아직 숨겨져 있어 위치를 계산할 수 없음
+  }
+
+  const rect = getAbsoluteRect(el, chain);
+  // 사이드바처럼 화면 가장자리에 붙은 요소는 배지를 -10px 띄우면 화면 밖으로 잘리므로 클램프
+  const clampedTop  = Math.max(4, rect.top - 10);
+  const clampedLeft = Math.max(4, rect.left - 10);
+
+  const tooltip = document.createElement('div');
+  tooltip.className   = TOOLTIP_CLASS;
+  tooltip.textContent = multiStep ? `Step ${i + 1}` : '여기를 찾아보세요';
+  tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
+  tooltip.style.left  = `${Math.max(4, rect.left)}px`;
+  document.body.appendChild(tooltip);
+
+  let badge = null;
+  if (multiStep) {
+    badge = document.createElement('div');
+    badge.className   = BADGE_CLASS;
+    badge.textContent = String(i + 1);
+    badge.style.top   = `${clampedTop}px`;
+    badge.style.left  = `${clampedLeft}px`;
+    document.body.appendChild(badge);
+  }
+
+  return { el, tooltip, badge };
+}
+
+function removeStepMarkers(marker) {
+  if (!marker) return;
+  marker.el.classList.remove(HIGHLIGHT_CLASS);
+  marker.tooltip?.remove();
+  marker.badge?.remove();
+}
+
+/**
+ * anchors 배열을 순서대로 안내합니다.
+ * 여러 단계(anchors.length > 1)일 때는 한 번에 다 띄우지 않고, 사용자가 실제
+ * 페이지에서 현재 단계 요소를 클릭할 때마다 다음 단계를 새로 찾아 보여줍니다.
+ * (성적정보 같은 아코디언을 펼치기 전엔 다음 단계 요소가 화면에 없어 위치를
+ * 계산할 수 없으므로, 클릭 → DOM 변화 → 재탐색 흐름이 필요합니다.)
+ *
+ * onStepComplete(index)는 anchors[index]에 해당하는 요소를 사용자가 실제로
+ * 클릭했을 때 호출됩니다 (ChatWidget이 체크리스트 UI를 갱신하는 데 사용).
+ */
+export function highlightAnchors(anchors, onStepComplete) {
+  clearHighlights();
+
+  // 툴팁/배지는 항상 top 문서의 body에 붙으므로, top 문서에도 스타일이 있어야 합니다.
+  // (타겟 요소가 전부 중첩 프레임 안에 있으면 그 프레임에만 스타일이 들어가 안 보이는 버그가 있었음)
+  ensureHighlightStyles(document);
+
+  const multiStep = anchors.length > 1;
+  const MAX_RETRIES = 6; // 600ms 간격으로 최대 ~3.6초까지만 재탐색 (무한 재시도 방지)
+
+  function revealStep(i, retriesLeft = MAX_RETRIES) {
+    if (i >= anchors.length) return;
+
+    const found = findElement(anchors[i]);
+    if (!found) {
+      console.log('[Guider] 하이라이트 대상 요소를 못 찾음:', anchors[i]);
+      return;
+    }
+    const { el, doc, chain } = found;
+    const marker = drawStepMarkers(el, doc, chain, i, multiStep);
+
+    if (!marker) {
+      if (retriesLeft <= 0) {
+        console.log('[Guider] 요소가 계속 숨겨져 있어 재탐색 포기:', anchors[i]);
+        return;
+      }
+      console.log('[Guider] 요소가 아직 숨겨져 있어 배지/툴팁 생략(펼치면 자동 재탐색):', anchors[i]);
+      // 지금은 안 보이지만, 클릭으로 펼쳐질 수 있으니 잠시 후 한 번 더 시도합니다.
+      setTimeout(() => revealStep(i, retriesLeft - 1), 600);
+      return;
+    }
+
+    if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // 단계가 1개뿐이어도(anchors.length === 1) 클릭하면 완료 처리는 동일하게 합니다.
+    // 배지/"Step N" 텍스트만 multiStep일 때 표시할 뿐, 완료 체크는 항상 필요합니다.
+    marker.el.addEventListener('click', function onStepClick() {
+      removeStepMarkers(marker);
+      onStepComplete?.(i);
+      // 클릭으로 아코디언이 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
+      setTimeout(() => revealStep(i + 1), 300);
+    }, { once: true });
+  }
+
+  revealStep(0);
+}
+
+/**
+ * 모든 프레임에 걸친 하이라이트와 top 문서의 툴팁을 제거합니다.
  */
 export function clearHighlights() {
-  _activeObservers.forEach(obs => obs.disconnect());
-  _activeObservers.length = 0;
-
-  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(el => {
-    el.classList.remove(HIGHLIGHT_CLASS);
-  });
+  for (const { doc } of collectFrameDocs(document, window)) {
+    doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(el => {
+      el.classList.remove(HIGHLIGHT_CLASS);
+    });
+  }
   document.querySelectorAll(`.${TOOLTIP_CLASS}`).forEach(el => el.remove());
+  document.querySelectorAll(`.${BADGE_CLASS}`).forEach(el => el.remove());
 }

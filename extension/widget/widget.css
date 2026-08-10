@@ -447,6 +447,55 @@ img {
   line-height: 1.4;
 }
 
+/* 실제 페이지에서 해당 단계 요소를 클릭하면 완료 처리되어 흐려지고 취소선이 붙습니다 */
+.gd-step-item--done {
+  opacity: 0.7;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.gd-step-item--done .gd-step-num {
+  background: #22c55e;
+}
+
+.gd-step-item--done .gd-step-label {
+  text-decoration: line-through;
+  color: #5c6b63;
+}
+
+/* 다단계 안내의 모든 단계를 완료했을 때 크게 보여주는 완료 배너 */
+.gd-complete-banner {
+  box-sizing:     border-box;
+  width:          100%;
+  display:        flex;
+  flex-direction: column;
+  align-items:    center;
+  gap:            8px;
+  padding:        20px 14px;
+  border-radius:  14px;
+  background:     linear-gradient(135deg, rgba(34,197,94,0.10), rgba(34,197,94,0.04));
+  border:         1px solid rgba(34,197,94,0.25);
+  text-align:     center;
+}
+
+.gd-complete-banner__icon {
+  width:            40px;
+  height:           40px;
+  border-radius:    50%;
+  background:       #22c55e;
+  color:            #fff;
+  font-size:        22px;
+  font-weight:      700;
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+}
+
+.gd-complete-banner__text {
+  font-size:   15px;
+  font-weight: 700;
+  color:       #14532d;
+}
+
 .gd-found-badge {
   width: 100%;
   padding: 10px 14px;
@@ -480,27 +529,39 @@ img {
 .gd-reset-btn {
   all: unset;
   box-sizing: border-box;
-  padding: 7px 16px;
-  border: 1.5px solid #7b2ff7;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(123, 47, 247, 0.08);
+  border: 1px solid rgba(123, 47, 247, 0.22);
+  font-size: 14px;
+  font-weight: 700;
   color: #7b2ff7;
+  text-align: center;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 
 .gd-reset-btn:hover {
-  background: rgba(123, 47, 247, 0.06);
+  background: rgba(123, 47, 247, 0.14);
+}
+
+.gd-reset-btn:active {
+  transform: scale(0.99);
 }
 
 .gd-reset-btn--error {
-  border-color: #e11d48;
+  background: rgba(225, 29, 72, 0.08);
+  border-color: rgba(225, 29, 72, 0.22);
   color: #e11d48;
 }
 
 .gd-reset-btn--error:hover {
-  background: rgba(225, 29, 72, 0.06);
+  background: rgba(225, 29, 72, 0.14);
+}
+
+.gd-reset-btn--error:hover {
+  box-shadow: 0 6px 18px rgba(225, 29, 72, 0.34);
 }
 
 /* ── 정보 찾음 상태 (type: found) ─────────────────────────────────────────── */

@@ -59,6 +59,7 @@ Rules:
  * 예시 출력:
  *   1. tag=a id="menu-link" aria-label="수강신청" role="" text="수강신청"
  *   2. tag=button id="" aria-label="" role="button" text="로그인"
+ *   3. tag=a id="grade-link" aria-label="" role="" text="금학기성적조회" visible=false revealBy="성적정보"
  */
 function formatElements(elements) {
   return elements

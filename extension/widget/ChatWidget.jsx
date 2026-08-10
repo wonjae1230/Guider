@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "../assets/icons/icon128.png";
 import { CloseIcon, MicIcon, SendIcon } from "./icons.jsx";
 import { useSpeechToText } from "./useSpeechToText.js";
-import { extractElements, extractPageText, extractHeadings, callAI, highlightAnchors, clearHighlights } from "./aiHelper.js";
+import { extractElements, extractPageText, extractHeadings, callAI, highlightAnchors, clearHighlights, waitForIframesReady } from "./aiHelper.js";
 
 const EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
 
@@ -26,6 +26,9 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const [phase,    setPhase]  = useState(PHASE.IDLE);
   const [result,   setResult] = useState(null);
   const [errorMsg, setError]  = useState("");
+  // 다단계 안내(anchors 2개 이상)에서 사용자가 실제 페이지에서 해당 단계 요소를
+  // 클릭할 때마다 highlightAnchors의 onStepComplete 콜백으로 채워지는 완료된 단계 인덱스
+  const [completedSteps, setCompletedSteps] = useState(new Set());
   const textareaRef  = useRef(null);
   const lastQuestion = useRef('');
   // stale closure 방지: URL 변경 이벤트 핸들러에서 최신 state를 읽기 위한 refs
@@ -45,19 +48,23 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setPhase(PHASE.LOADING);
     setResult(null);
     setError("");
+    setCompletedSteps(new Set());
     clearHighlights();
 
     try {
-      const elements = extractElements(question); // 질문 키워드로 관련 요소 우선 정렬
+      await waitForIframesReady();
+      const elements = extractElements();
       const pageText = extractPageText();
-      const headings = extractHeadings();        // 페이지 섹션 구조 전달
+      const headings = extractHeadings();
       const aiResult = await callAI(question, elements, pageText, headings);
 
       setResult(aiResult);
       setPhase(PHASE.RESULT);
 
       if (aiResult.anchors?.length > 0) {
-        highlightAnchors(aiResult.anchors);
+        highlightAnchors(aiResult.anchors, (i) => {
+          setCompletedSteps((prev) => new Set(prev).add(i));
+        });
       }
 
       // 탭 대화 기록 저장: 같은 탭에서 돌아왔을 때 결과를 복원하기 위함
@@ -91,6 +98,16 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // (하이라이트는 DOM이 바뀌었을 수 있어 복원하지 않습니다)
   useEffect(() => {
     try {
+      // 새로고침(F5)은 sessionStorage 기준으로 "같은 탭, 같은 URL"이라 그냥 두면
+      // 이전 대화가 그대로 복원돼 버립니다. Navigation Timing API로 실제 새로고침인
+      // 경우만 구분해서 기록을 지우고 첫 화면(IDLE)으로 시작합니다.
+      // (링크 클릭 등으로 같은 URL에 돌아온 경우는 'navigate'라 기존처럼 복원됩니다)
+      const navEntry = performance.getEntriesByType('navigation')[0];
+      if (navEntry?.type === 'reload') {
+        sessionStorage.removeItem(TAB_STATE_KEY);
+        return;
+      }
+
       const saved = sessionStorage.getItem(TAB_STATE_KEY);
       if (!saved) return;
       const { question, result: savedResult, url } = JSON.parse(saved);
@@ -175,6 +192,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setPhase(PHASE.IDLE);
     setResult(null);
     setError("");
+    setCompletedSteps(new Set());
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
@@ -182,6 +200,8 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const hasAnchors = anchors.length > 0;
   // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
   const resultType = result?.type ?? 'navigate';
+  // 안내(투두리스트, 1단계여도 포함)의 모든 단계를 실제로 클릭 완료했는지
+  const allStepsDone = anchors.length > 0 && completedSteps.size >= anchors.length;
 
   return (
     <div className="gd-card">
@@ -249,24 +269,29 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
               {/* AI 안내 메시지 */}
               <p className="gd-result-reason">{result.reason}</p>
 
-              {/* 다중 단계 */}
-              {hasAnchors && anchors.length > 1 && (
+              {/* 안내 체크리스트: 단계가 1개여도 동일하게 표시. 실제 페이지에서
+                  해당 요소를 클릭하면 완료 표시(취소선)됨 */}
+              {hasAnchors && (
                 <ol className="gd-step-list">
-                  {anchors.map((anchor, i) => (
-                    <li key={i} className="gd-step-item">
-                      <span className="gd-step-num">{i + 1}</span>
-                      <span className="gd-step-label">
-                        {anchor.text || anchor.ariaLabel || anchor.id || `요소 ${i + 1}`}
-                      </span>
-                    </li>
-                  ))}
+                  {anchors.map((anchor, i) => {
+                    const done = completedSteps.has(i);
+                    return (
+                      <li key={i} className={`gd-step-item${done ? ' gd-step-item--done' : ''}`}>
+                        <span className="gd-step-num">{done ? '✓' : i + 1}</span>
+                        <span className="gd-step-label">
+                          {anchor.text || anchor.ariaLabel || anchor.id || `요소 ${i + 1}`}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
 
-              {/* 단일 요소 */}
-              {hasAnchors && anchors.length === 1 && (
-                <div className="gd-found-badge">
-                  {anchors[0].text || anchors[0].ariaLabel || anchors[0].id}
+              {/* 모든 단계를 실제로 클릭 완료했을 때 크게 보여주는 완료 배너 */}
+              {allStepsDone && (
+                <div className="gd-complete-banner">
+                  <span className="gd-complete-banner__icon">✓</span>
+                  <span className="gd-complete-banner__text">모든 단계를 완료했어요!</span>
                 </div>
               )}
 
