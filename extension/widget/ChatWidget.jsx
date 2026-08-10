@@ -193,8 +193,8 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const hasAnchors = anchors.length > 0;
   // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
   const resultType = result?.type ?? 'navigate';
-  // 다단계 안내(투두리스트)의 모든 단계를 실제로 클릭 완료했는지
-  const allStepsDone = anchors.length > 1 && completedSteps.size >= anchors.length;
+  // 안내(투두리스트, 1단계여도 포함)의 모든 단계를 실제로 클릭 완료했는지
+  const allStepsDone = anchors.length > 0 && completedSteps.size >= anchors.length;
 
   return (
     <div className="gd-card">
@@ -262,8 +262,9 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
               {/* AI 안내 메시지 */}
               <p className="gd-result-reason">{result.reason}</p>
 
-              {/* 다중 단계: 실제 페이지에서 해당 요소를 클릭하면 완료 표시(취소선)됨 */}
-              {hasAnchors && anchors.length > 1 && (
+              {/* 안내 체크리스트: 단계가 1개여도 동일하게 표시. 실제 페이지에서
+                  해당 요소를 클릭하면 완료 표시(취소선)됨 */}
+              {hasAnchors && (
                 <ol className="gd-step-list">
                   {anchors.map((anchor, i) => {
                     const done = completedSteps.has(i);
@@ -284,13 +285,6 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
                 <div className="gd-complete-banner">
                   <span className="gd-complete-banner__icon">✓</span>
                   <span className="gd-complete-banner__text">모든 단계를 완료했어요!</span>
-                </div>
-              )}
-
-              {/* 단일 요소 */}
-              {hasAnchors && anchors.length === 1 && (
-                <div className="gd-found-badge">
-                  {anchors[0].text || anchors[0].ariaLabel || anchors[0].id}
                 </div>
               )}
 

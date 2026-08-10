@@ -560,14 +560,14 @@ export function highlightAnchors(anchors, onStepComplete) {
 
     if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    if (multiStep) {
-      marker.el.addEventListener('click', function onStepClick() {
-        removeStepMarkers(marker);
-        onStepComplete?.(i);
-        // 클릭으로 아코디언이 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
-        setTimeout(() => revealStep(i + 1), 300);
-      }, { once: true });
-    }
+    // 단계가 1개뿐이어도(anchors.length === 1) 클릭하면 완료 처리는 동일하게 합니다.
+    // 배지/"Step N" 텍스트만 multiStep일 때 표시할 뿐, 완료 체크는 항상 필요합니다.
+    marker.el.addEventListener('click', function onStepClick() {
+      removeStepMarkers(marker);
+      onStepComplete?.(i);
+      // 클릭으로 아코디언이 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
+      setTimeout(() => revealStep(i + 1), 300);
+    }, { once: true });
   }
 
   revealStep(0);
