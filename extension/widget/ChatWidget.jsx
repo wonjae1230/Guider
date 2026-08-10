@@ -26,6 +26,9 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const [phase,    setPhase]  = useState(PHASE.IDLE);
   const [result,   setResult] = useState(null);
   const [errorMsg, setError]  = useState("");
+  // 다단계 안내(anchors 2개 이상)에서 사용자가 실제 페이지에서 해당 단계 요소를
+  // 클릭할 때마다 highlightAnchors의 onStepComplete 콜백으로 채워지는 완료된 단계 인덱스
+  const [completedSteps, setCompletedSteps] = useState(new Set());
   const textareaRef  = useRef(null);
   const lastQuestion = useRef('');
   // stale closure 방지: URL 변경 이벤트 핸들러에서 최신 state를 읽기 위한 refs
@@ -45,6 +48,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setPhase(PHASE.LOADING);
     setResult(null);
     setError("");
+    setCompletedSteps(new Set());
     clearHighlights();
 
     try {
@@ -57,7 +61,9 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       setPhase(PHASE.RESULT);
 
       if (aiResult.anchors?.length > 0) {
-        highlightAnchors(aiResult.anchors);
+        highlightAnchors(aiResult.anchors, (i) => {
+          setCompletedSteps((prev) => new Set(prev).add(i));
+        });
       }
 
       // 탭 대화 기록 저장: 같은 탭에서 돌아왔을 때 결과를 복원하기 위함
@@ -169,6 +175,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setPhase(PHASE.IDLE);
     setResult(null);
     setError("");
+    setCompletedSteps(new Set());
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
@@ -243,17 +250,20 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
               {/* AI 안내 메시지 */}
               <p className="gd-result-reason">{result.reason}</p>
 
-              {/* 다중 단계 */}
+              {/* 다중 단계: 실제 페이지에서 해당 요소를 클릭하면 완료 표시(취소선)됨 */}
               {hasAnchors && anchors.length > 1 && (
                 <ol className="gd-step-list">
-                  {anchors.map((anchor, i) => (
-                    <li key={i} className="gd-step-item">
-                      <span className="gd-step-num">{i + 1}</span>
-                      <span className="gd-step-label">
-                        {anchor.text || anchor.ariaLabel || anchor.id || `요소 ${i + 1}`}
-                      </span>
-                    </li>
-                  ))}
+                  {anchors.map((anchor, i) => {
+                    const done = completedSteps.has(i);
+                    return (
+                      <li key={i} className={`gd-step-item${done ? ' gd-step-item--done' : ''}`}>
+                        <span className="gd-step-num">{done ? '✓' : i + 1}</span>
+                        <span className="gd-step-label">
+                          {anchor.text || anchor.ariaLabel || anchor.id || `요소 ${i + 1}`}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
 

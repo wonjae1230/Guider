@@ -356,6 +356,8 @@ export async function callAI(question, elements, pageText = '') {
 // extractElements와 마찬가지로 anchor가 top이 아니라 중첩된 frame/iframe 안의
 // 요소를 가리킬 수 있으므로, 하이라이트도 collectFrameDocs로 모든 프레임을 뒤집니다.
 
+const BADGE_CLASS = 'guider-badge';
+
 function ensureHighlightStyles(doc) {
   if (doc.getElementById('guider-hl-styles')) return;
 
@@ -381,6 +383,24 @@ function ensureHighlightStyles(doc) {
       z-index:       2147483646;
       pointer-events: none;
       box-shadow:    0 2px 8px rgba(0,0,0,0.15);
+    }
+    .${BADGE_CLASS} {
+      position:        fixed;
+      width:           20px;
+      height:          20px;
+      border-radius:   50%;
+      background:      ${HL_COLOR};
+      color:            #fff;
+      font-size:        12px;
+      font-weight:      700;
+      font-family:      -apple-system, BlinkMacSystemFont, sans-serif;
+      display:          flex;
+      align-items:      center;
+      justify-content:  center;
+      z-index:          2147483647;
+      pointer-events:   none;
+      box-shadow:       0 1px 4px rgba(0,0,0,0.35);
+      border:           2px solid #fff;
     }
   `;
   doc.head.appendChild(style);
@@ -451,38 +471,106 @@ function getAbsoluteRect(el, chain) {
 }
 
 /**
- * anchors 배열의 각 요소를 탐색해 하이라이트하고 툴팁을 표시합니다.
- * 첫 번째 요소로 스크롤합니다.
+ * 요소 하나에 배지/툴팁을 그립니다. 요소가 아직 (접힌 아코디언 등으로) 렌더링
+ * 안 된 상태면(getBoundingClientRect가 0,0,0,0) 아무것도 그리지 않고 false를 반환합니다.
+ * 반환값의 tooltip/badge는 나중에 removeMarkers에서 정확히 이 요소 것만 지우는 데 씁니다.
  */
-export function highlightAnchors(anchors) {
+function drawStepMarkers(el, doc, chain, i, multiStep) {
+  ensureHighlightStyles(doc); // 요소가 속한 프레임의 document에도 주입 (.guider-hl 적용용)
+  el.classList.add(HIGHLIGHT_CLASS);
+
+  const localRect = el.getBoundingClientRect();
+  if (localRect.width === 0 && localRect.height === 0) {
+    return null; // 아직 숨겨져 있어 위치를 계산할 수 없음
+  }
+
+  const rect = getAbsoluteRect(el, chain);
+  // 사이드바처럼 화면 가장자리에 붙은 요소는 배지를 -10px 띄우면 화면 밖으로 잘리므로 클램프
+  const clampedTop  = Math.max(4, rect.top - 10);
+  const clampedLeft = Math.max(4, rect.left - 10);
+
+  const tooltip = document.createElement('div');
+  tooltip.className  = TOOLTIP_CLASS;
+  tooltip.textContent = multiStep ? `Step ${i + 1}` : '여기를 찾아보세요';
+  tooltip.style.top  = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
+  tooltip.style.left = `${Math.max(4, rect.left)}px`;
+  document.body.appendChild(tooltip);
+
+  let badge = null;
+  if (multiStep) {
+    badge = document.createElement('div');
+    badge.className   = BADGE_CLASS;
+    badge.textContent = String(i + 1);
+    badge.style.top   = `${clampedTop}px`;
+    badge.style.left  = `${clampedLeft}px`;
+    document.body.appendChild(badge);
+  }
+
+  return { el, tooltip, badge };
+}
+
+function removeStepMarkers(marker) {
+  if (!marker) return;
+  marker.el.classList.remove(HIGHLIGHT_CLASS);
+  marker.tooltip?.remove();
+  marker.badge?.remove();
+}
+
+/**
+ * anchors 배열을 순서대로 안내합니다.
+ * 여러 단계(anchors.length > 1)일 때는 한 번에 다 띄우지 않고, 사용자가 실제
+ * 페이지에서 현재 단계 요소를 클릭할 때마다 다음 단계를 새로 찾아 보여줍니다.
+ * (성적정보 같은 아코디언을 펼치기 전엔 다음 단계 요소가 화면에 없어 위치를
+ * 계산할 수 없으므로, 클릭 → DOM 변화 → 재탐색 흐름이 필요합니다.)
+ *
+ * onStepComplete(index)는 anchors[index]에 해당하는 요소를 사용자가 실제로
+ * 클릭했을 때 호출됩니다 (ChatWidget이 체크리스트 UI를 갱신하는 데 사용).
+ */
+export function highlightAnchors(anchors, onStepComplete) {
   clearHighlights();
 
-  let scrollTarget = null;
+  // 툴팁/배지는 항상 top 문서의 body에 붙으므로, top 문서에도 스타일이 있어야 합니다.
+  // (타겟 요소가 전부 중첩 프레임 안에 있으면 그 프레임에만 스타일이 들어가 안 보이는 버그가 있었음)
+  ensureHighlightStyles(document);
 
-  anchors.forEach((anchor, i) => {
-    const found = findElement(anchor);
+  const multiStep = anchors.length > 1;
+  const MAX_RETRIES = 6; // 600ms 간격으로 최대 ~3.6초까지만 재탐색 (무한 재시도 방지)
+
+  function revealStep(i, retriesLeft = MAX_RETRIES) {
+    if (i >= anchors.length) return;
+
+    const found = findElement(anchors[i]);
     if (!found) {
-      console.log('[Guider] 하이라이트 대상 요소를 못 찾음:', anchor);
+      console.log('[Guider] 하이라이트 대상 요소를 못 찾음:', anchors[i]);
       return;
     }
     const { el, doc, chain } = found;
+    const marker = drawStepMarkers(el, doc, chain, i, multiStep);
 
-    ensureHighlightStyles(doc); // 요소가 속한 프레임의 document에 스타일 주입
-    el.classList.add(HIGHLIGHT_CLASS);
+    if (!marker) {
+      if (retriesLeft <= 0) {
+        console.log('[Guider] 요소가 계속 숨겨져 있어 재탐색 포기:', anchors[i]);
+        return;
+      }
+      console.log('[Guider] 요소가 아직 숨겨져 있어 배지/툴팁 생략(펼치면 자동 재탐색):', anchors[i]);
+      // 지금은 안 보이지만, 클릭으로 펼쳐질 수 있으니 잠시 후 한 번 더 시도합니다.
+      setTimeout(() => revealStep(i, retriesLeft - 1), 600);
+      return;
+    }
 
-    // 툴팁은 항상 top 문서에 띄우되, 좌표는 프레임 체인을 거쳐 top 뷰포트 기준으로 변환
-    const rect    = getAbsoluteRect(el, chain);
-    const tooltip = document.createElement('div');
-    tooltip.className  = TOOLTIP_CLASS;
-    tooltip.textContent = anchors.length > 1 ? `Step ${i + 1}` : '여기를 찾아보세요';
-    tooltip.style.top  = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
-    tooltip.style.left = `${rect.left}px`;
-    document.body.appendChild(tooltip);
+    if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    if (!scrollTarget) scrollTarget = el;
-  });
+    if (multiStep) {
+      marker.el.addEventListener('click', function onStepClick() {
+        removeStepMarkers(marker);
+        onStepComplete?.(i);
+        // 클릭으로 아코디언이 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
+        setTimeout(() => revealStep(i + 1), 300);
+      }, { once: true });
+    }
+  }
 
-  scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  revealStep(0);
 }
 
 /**
@@ -495,4 +583,5 @@ export function clearHighlights() {
     });
   }
   document.querySelectorAll(`.${TOOLTIP_CLASS}`).forEach(el => el.remove());
+  document.querySelectorAll(`.${BADGE_CLASS}`).forEach(el => el.remove());
 }

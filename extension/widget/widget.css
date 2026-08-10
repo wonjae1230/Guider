@@ -447,6 +447,19 @@ img {
   line-height: 1.4;
 }
 
+/* 실제 페이지에서 해당 단계 요소를 클릭하면 완료 처리되어 흐려지고 취소선이 붙습니다 */
+.gd-step-item--done {
+  opacity: 0.55;
+}
+
+.gd-step-item--done .gd-step-num {
+  background: #9a9a9a;
+}
+
+.gd-step-item--done .gd-step-label {
+  text-decoration: line-through;
+}
+
 .gd-found-badge {
   width: 100%;
   padding: 10px 14px;
