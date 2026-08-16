@@ -22,6 +22,72 @@ const SESSION_KEY = 'guiderPendingQuery';
 // 탭 전환 후 돌아와도, 같은 탭 내 페이지 이동 후 돌아와도 이전 결과를 복원합니다.
 const TAB_STATE_KEY = 'guiderTabState';
 
+// 대화 한 턴(질문 + AI 답변)을 그린다. 진행 중인 턴과, 페이지 이동으로 아래에 쌓인
+// 지난 턴(isHistory) 모두 이 컴포넌트로 그려서 완료 배너를 포함해 그대로 이어 보입니다.
+function ChatTurn({ question, result, completedSteps, isHistory = false }) {
+  const anchors     = result?.anchors ?? [];
+  const hasAnchors  = anchors.length > 0;
+  // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
+  const resultType  = result?.type ?? 'navigate';
+  const doneSet     = new Set(completedSteps);
+  // 안내(투두리스트, 1단계여도 포함)의 모든 단계를 실제로 클릭 완료했는지
+  const allStepsDone = hasAnchors && doneSet.size >= anchors.length;
+
+  return (
+    <div className={`gd-turn${isHistory ? ' gd-turn--history' : ''}`}>
+      {question && <p className="gd-turn__question">&quot;{question}&quot;</p>}
+
+      {/* type: found → 페이지에서 정보를 직접 찾은 경우 (이메일, 학점 등) */}
+      {resultType === 'found' ? (
+        <div className="gd-info-box">
+          <div className="gd-info-box__label">✓ 찾았어요!</div>
+          <p className="gd-info-box__text">{result.reason}</p>
+        </div>
+      ) : (
+        <>
+          {/* AI 안내 메시지 */}
+          <p className="gd-result-reason">{result.reason}</p>
+
+          {/* 안내 체크리스트: 단계가 1개여도 동일하게 표시. 실제 페이지에서
+              해당 요소를 클릭하면 완료 표시(취소선)됨 */}
+          {hasAnchors && (
+            <ol className="gd-step-list">
+              {anchors.map((anchor, i) => {
+                const done = doneSet.has(i);
+                return (
+                  <li key={i} className={`gd-step-item${done ? ' gd-step-item--done' : ''}`}>
+                    <span className="gd-step-num">{done ? '✓' : i + 1}</span>
+                    <span className="gd-step-label">
+                      {anchor.text || anchor.ariaLabel || anchor.id || `요소 ${i + 1}`}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+
+          {/* 모든 단계를 실제로 클릭 완료했을 때 크게 보여주는 완료 배너 */}
+          {allStepsDone && (
+            <div className="gd-complete-banner">
+              <span className="gd-complete-banner__confetti" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+              </span>
+              <span className="gd-complete-banner__icon">✓</span>
+              <span className="gd-complete-banner__text">모든 단계를 완료했어요!</span>
+            </div>
+          )}
+
+          {/* 요소 미발견 */}
+          {!hasAnchors && (
+            <p className="gd-not-found">현재 페이지에서 해당 기능을 찾지 못했어요.</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const [value,    setValue]  = useState("");
   const [phase,    setPhase]  = useState(PHASE.IDLE);
@@ -30,6 +96,9 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // 다단계 안내(anchors 2개 이상)에서 사용자가 실제 페이지에서 해당 단계 요소를
   // 클릭할 때마다 highlightAnchors의 onStepComplete 콜백으로 채워지는 완료된 단계 인덱스
   const [completedSteps, setCompletedSteps] = useState(new Set());
+  // 페이지 이동으로 다음 턴이 시작되어도 이전 턴(질문+답변+체크리스트)이 사라지지
+  // 않도록 대화창처럼 아래에 쌓아두는 기록. 새 턴이 시작될 때 직전 턴이 여기로 옮겨갑니다.
+  const [turnHistory, setTurnHistory] = useState([]);
   // IDLE 화면 예시 질문: 기본값이 먼저 반짝 보였다가 AI 예시로 바뀌면 어색하므로,
   // 로딩 중엔 스켈레톤을 보여주고 AI 예시가 도착한 뒤에야 실제 버튼을 표시합니다.
   const [examples, setExamples] = useState(DEFAULT_EXAMPLES);
@@ -39,9 +108,22 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // stale closure 방지: URL 변경 이벤트 핸들러에서 최신 state를 읽기 위한 refs
   const phaseRef     = useRef(PHASE.IDLE);
   const resultRef    = useRef(null);
+  // history와 짝을 이루는 refs: setState 타이밍에 의존하지 않고 triggerQuery 안에서
+  // 바로 다음 턴의 히스토리 아카이빙 여부를 동기적으로 판단하기 위해 사용합니다.
+  const historyRef        = useRef([]);
+  const resultQuestionRef = useRef('');
+  const completedStepsRef = useRef(new Set());
+  // 대화 스크롤 영역: 새 턴이 추가되면 맨 아래로 자동 스크롤합니다.
+  const bodyRef = useRef(null);
 
   useEffect(() => { phaseRef.current  = phase;  }, [phase]);
   useEffect(() => { resultRef.current = result; }, [result]);
+  useEffect(() => { completedStepsRef.current = completedSteps; }, [completedSteps]);
+
+  // 새 턴(히스토리 추가, 로딩 시작, 결과 도착)이 생길 때마다 대화창을 맨 아래로 스크롤
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [turnHistory, phase, result]);
 
   // 마운트 시 한 번, 현재 페이지에 맞는 예시 질문을 가져옵니다. 실패하면
   // (네트워크 오류 등) 조용히 기본값으로 폴백하되, 로딩 표시는 항상 끝냅니다.
@@ -69,6 +151,17 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // ── 공통 질문 처리 ─────────────────────────────────────────────────────────
   // handleSend와 자동 재실행 양쪽에서 호출되므로 분리합니다.
   const triggerQuery = useCallback(async (question) => {
+    // 직전 턴에 결과가 남아있다면(체크리스트, 완료 배너 포함) 지우지 않고
+    // 히스토리로 옮겨서 새 턴 아래에 계속 보이도록 합니다.
+    if (resultRef.current) {
+      historyRef.current = [...historyRef.current, {
+        question:       resultQuestionRef.current,
+        result:         resultRef.current,
+        completedSteps: Array.from(completedStepsRef.current),
+      }];
+      setTurnHistory(historyRef.current);
+    }
+
     setValue("");
     setPhase(PHASE.LOADING);
     setResult(null);
@@ -85,21 +178,13 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
       setResult(aiResult);
       setPhase(PHASE.RESULT);
+      resultQuestionRef.current = question;
 
       if (aiResult.anchors?.length > 0) {
         highlightAnchors(aiResult.anchors, (i) => {
           setCompletedSteps((prev) => new Set(prev).add(i));
         });
       }
-
-      // 탭 대화 기록 저장: 같은 탭에서 돌아왔을 때 결과를 복원하기 위함
-      try {
-        sessionStorage.setItem(TAB_STATE_KEY, JSON.stringify({
-          question,
-          result: aiResult,
-          url: location.href,
-        }));
-      } catch {}
 
       // navigate 타입이면 다음 페이지 이동 후 자동 재실행할 수 있도록 저장
       // sessionStorage는 같은 탭 내 MPA 이동에도 유지되어 chrome.storage.session보다 신뢰성이 높습니다.
@@ -118,6 +203,23 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     }
   }, []);
 
+  // ── 탭 대화 기록 저장 ──────────────────────────────────────────────────────
+  // 현재 턴(질문+답변)과 그 위에 쌓인 히스토리, 체크리스트 진행 상황을 매번 최신으로
+  // 저장해 둡니다. 체크 표시가 바뀔 때도 다시 저장되어야 페이지 이동 직전 상태가
+  // 정확히 남습니다 (완료 배너가 뜬 채로 다음 페이지로 넘어가는 경우 등).
+  useEffect(() => {
+    if (phase !== PHASE.RESULT || !result) return;
+    try {
+      sessionStorage.setItem(TAB_STATE_KEY, JSON.stringify({
+        question: resultQuestionRef.current,
+        result,
+        url: location.href,
+        history: turnHistory,
+        completedSteps: Array.from(completedSteps),
+      }));
+    } catch {}
+  }, [phase, result, completedSteps, turnHistory]);
+
   // ── 마운트 시 탭 대화 기록 복원 ────────────────────────────────────────────
   // sessionStorage는 탭별로 분리되어 있으므로 탭 전환 후 돌아와도 이 탭의 기록만 복원합니다.
   // (하이라이트는 DOM이 바뀌었을 수 있어 복원하지 않습니다)
@@ -135,10 +237,13 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
       const saved = sessionStorage.getItem(TAB_STATE_KEY);
       if (!saved) return;
-      const { question, result: savedResult, url } = JSON.parse(saved);
+      const { question, result: savedResult, url, history: savedHistory } = JSON.parse(saved);
       // 같은 URL일 때만 복원 (다른 페이지에서의 기록은 auto-retry가 처리)
       if (url === location.href && savedResult) {
         lastQuestion.current = question;
+        resultQuestionRef.current = question;
+        historyRef.current = savedHistory || [];
+        setTurnHistory(historyRef.current);
         setResult(savedResult);
         setPhase(PHASE.RESULT);
       }
@@ -157,6 +262,20 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
         const pending = JSON.parse(pendingRaw);
         if (pending.fromUrl !== location.href) {
           sessionStorage.removeItem(SESSION_KEY);
+
+          // 이전 페이지에서의 마지막 턴(완료 배너 포함)을 이번 위젯 인스턴스로
+          // 옮겨와야 triggerQuery가 그것을 히스토리로 archiving할 수 있습니다.
+          try {
+            const savedRaw = sessionStorage.getItem(TAB_STATE_KEY);
+            if (savedRaw) {
+              const saved = JSON.parse(savedRaw);
+              resultQuestionRef.current = saved.question;
+              resultRef.current         = saved.result;
+              completedStepsRef.current = new Set(saved.completedSteps || []);
+              historyRef.current        = saved.history || [];
+            }
+          } catch {}
+
           lastQuestion.current = pending.question;
           triggerQuery(pending.question);
         }
@@ -210,6 +329,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     }
   };
 
+  // "다시 질문하기": 이전 턴들을 이어붙이지 않고 완전히 새 대화로 시작합니다.
   const handleReset = () => {
     clearHighlights();
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
@@ -218,15 +338,13 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setResult(null);
     setError("");
     setCompletedSteps(new Set());
+    setTurnHistory([]);
+    historyRef.current        = [];
+    resultRef.current         = null;
+    resultQuestionRef.current = '';
+    completedStepsRef.current = new Set();
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
-
-  const anchors    = result?.anchors ?? [];
-  const hasAnchors = anchors.length > 0;
-  // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
-  const resultType = result?.type ?? 'navigate';
-  // 안내(투두리스트, 1단계여도 포함)의 모든 단계를 실제로 클릭 완료했는지
-  const allStepsDone = anchors.length > 0 && completedSteps.size >= anchors.length;
 
   return (
     <div className="gd-card">
@@ -286,63 +404,30 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
         </div>
       )}
 
+      {/* 히스토리가 쌓인 상태(페이지 이동으로 이어지는 대화)에서는 로딩/결과/오류
+          화면 모두 이전 턴들을 위에 두고 그 아래에서 이어지도록 표시합니다. */}
       {phase === PHASE.LOADING && (
-        <div className="gd-body gd-body--center">
-          <div className="gd-spinner" />
-          <p className="gd-loading-text">페이지를 분석하고 있어요...</p>
+        <div
+          className={`gd-body ${turnHistory.length > 0 ? 'gd-body--result' : 'gd-body--center'}`}
+          ref={bodyRef}
+        >
+          {turnHistory.map((turn, i) => (
+            <ChatTurn key={i} question={turn.question} result={turn.result} completedSteps={turn.completedSteps} isHistory />
+          ))}
+          <div className={`gd-loading-turn${turnHistory.length > 0 ? ' gd-loading-turn--inline' : ''}`}>
+            <div className="gd-spinner" />
+            <p className="gd-loading-text">페이지를 분석하고 있어요...</p>
+          </div>
         </div>
       )}
 
       {phase === PHASE.RESULT && result && (
-        <div className="gd-body gd-body--result">
+        <div className="gd-body gd-body--result" ref={bodyRef}>
+          {turnHistory.map((turn, i) => (
+            <ChatTurn key={i} question={turn.question} result={turn.result} completedSteps={turn.completedSteps} isHistory />
+          ))}
 
-          {/* type: found → 페이지에서 정보를 직접 찾은 경우 (이메일, 학점 등) */}
-          {resultType === 'found' ? (
-            <div className="gd-info-box">
-              <div className="gd-info-box__label">✓ 찾았어요!</div>
-              <p className="gd-info-box__text">{result.reason}</p>
-            </div>
-          ) : (
-            <>
-              {/* AI 안내 메시지 */}
-              <p className="gd-result-reason">{result.reason}</p>
-
-              {/* 안내 체크리스트: 단계가 1개여도 동일하게 표시. 실제 페이지에서
-                  해당 요소를 클릭하면 완료 표시(취소선)됨 */}
-              {hasAnchors && (
-                <ol className="gd-step-list">
-                  {anchors.map((anchor, i) => {
-                    const done = completedSteps.has(i);
-                    return (
-                      <li key={i} className={`gd-step-item${done ? ' gd-step-item--done' : ''}`}>
-                        <span className="gd-step-num">{done ? '✓' : i + 1}</span>
-                        <span className="gd-step-label">
-                          {anchor.text || anchor.ariaLabel || anchor.id || `요소 ${i + 1}`}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-
-              {/* 모든 단계를 실제로 클릭 완료했을 때 크게 보여주는 완료 배너 */}
-              {allStepsDone && (
-                <div className="gd-complete-banner">
-                  <span className="gd-complete-banner__confetti" aria-hidden="true">
-                    <span></span><span></span><span></span>
-                    <span></span><span></span><span></span>
-                  </span>
-                  <span className="gd-complete-banner__icon">✓</span>
-                  <span className="gd-complete-banner__text">모든 단계를 완료했어요!</span>
-                </div>
-              )}
-
-              {/* 요소 미발견 */}
-              {!hasAnchors && (
-                <p className="gd-not-found">현재 페이지에서 해당 기능을 찾지 못했어요.</p>
-              )}
-            </>
-          )}
+          <ChatTurn question={resultQuestionRef.current} result={result} completedSteps={Array.from(completedSteps)} />
 
           <button type="button" className="gd-reset-btn" onClick={handleReset}>
             다시 질문하기
@@ -351,7 +436,13 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       )}
 
       {phase === PHASE.ERROR && (
-        <div className="gd-body gd-body--center">
+        <div
+          className={`gd-body ${turnHistory.length > 0 ? 'gd-body--result' : 'gd-body--center'}`}
+          ref={bodyRef}
+        >
+          {turnHistory.map((turn, i) => (
+            <ChatTurn key={i} question={turn.question} result={turn.result} completedSteps={turn.completedSteps} isHistory />
+          ))}
           <p className="gd-error-msg">{errorMsg}</p>
           <button type="button" className="gd-reset-btn gd-reset-btn--error" onClick={handleReset}>
             다시 시도

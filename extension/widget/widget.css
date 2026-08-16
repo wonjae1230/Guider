@@ -422,6 +422,29 @@ img {
   color: #7a768a;
 }
 
+/* 페이지 이동으로 대화가 이어지는 중일 때(위에 히스토리 턴이 있을 때)의 로딩 표시.
+   첫 질문의 큰 중앙 스피너와 달리, 대화 흐름 아래에 작게 이어 붙는 인라인 형태입니다. */
+.gd-loading-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.gd-loading-turn--inline {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.gd-loading-turn--inline .gd-spinner {
+  width: 22px;
+  height: 22px;
+  border-width: 2px;
+}
+
 /* ── 결과 상태 ─────────────────────────────────────────────────────────────── */
 
 .gd-body--result {
@@ -430,6 +453,29 @@ img {
   text-align: left;
   gap: 14px;
   overflow-y: auto;
+}
+
+/* 대화 한 턴(질문 + 답변). 페이지 이동으로 여러 턴이 쌓이면 각 턴이 이 단위로
+   .gd-body--result 안에 세로로 이어집니다. */
+.gd-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+}
+
+/* 이미 지나간(페이지를 떠난) 턴: 현재 턴과 구분되도록 아래 경계선을 둡니다. */
+.gd-turn--history {
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(24, 18, 42, 0.08);
+}
+
+.gd-turn__question {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9b96a8;
 }
 
 .gd-result-reason {
