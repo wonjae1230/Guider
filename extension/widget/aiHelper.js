@@ -9,28 +9,39 @@ const BACKEND_URL    = 'http://localhost:3000';
 const HIGHLIGHT_CLASS = 'guider-hl';
 const TOOLTIP_CLASS   = 'guider-tt';
 
-// 하이라이트 색상: 사이트마다 배경색이 다르므로(흰 배경 vs 다크 테마 등),
-// 고정된 보라색 하나만 쓰면 일부 사이트에서 잘 안 보일 수 있습니다.
-// 강조할 요소 주변의 실제 배경색을 읽어서, 그 배경과 대비가 강한 색을 고릅니다.
-const HL_COLOR             = '#7b2ff7'; // 기본값(계산 실패 시 폴백) — 위젯 브랜드 보라
-const HL_COLOR_ON_LIGHT_BG = '#7b2ff7'; // 밝은 배경용
-const HL_COLOR_ON_DARK_BG  = '#ffd60a'; // 어두운 배경용 — 다크 테마에서도 잘 보이는 밝은 골드
+// ─── 하이라이트 색상 계산 ────────────────────────────────────────────────────
+// 보라 계열 hue를 고정하고, 요소 주변 배경과의 WCAG 대비율이 더 높은
+// 어두운 보라(밝은 배경용) / 밝은 라벤더(어두운 배경용) 중 하나를 선택합니다.
 
-function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+const HL_HUE = 270;
+
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function hexToRgbArray(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
 }
 
 function parseRgbString(str) {
   const m = str?.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/);
   if (!m) return null;
   const alpha = m[4] === undefined ? 1 : Number(m[4]);
-  if (alpha === 0) return null; // 완전 투명은 배경으로 안 침
+  if (alpha === 0) return null;
   return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
-// el부터 조상 체인을 올라가며 처음 만나는 불투명 배경색을 찾습니다.
-// 못 찾으면(전부 transparent) 흰 배경으로 가정합니다(웹페이지 기본값).
 function getEffectiveBackground(el, win = window) {
   let node = el;
   while (node) {
@@ -45,7 +56,6 @@ function getEffectiveBackground(el, win = window) {
   return [255, 255, 255];
 }
 
-// WCAG 상대 휘도(0=검정 ~ 1=흰색)
 function relativeLuminance([r, g, b]) {
   const [R, G, B] = [r, g, b].map((c) => {
     const v = c / 255;
@@ -54,10 +64,30 @@ function relativeLuminance([r, g, b]) {
   return 0.2126 * R + 0.7152 * G + 0.0722 * B;
 }
 
-// el 주변의 실제 배경 밝기에 따라 대비가 강한 하이라이트 색을 고릅니다.
-function pickHighlightColor(el, win = window) {
-  const bg = getEffectiveBackground(el, win);
-  return relativeLuminance(bg) < 0.4 ? HL_COLOR_ON_DARK_BG : HL_COLOR_ON_LIGHT_BG;
+function contrastRatio(l1, l2) {
+  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+// 배경과의 WCAG 대비율이 더 높은 색을 고릅니다.
+// { color, bgColor, textColor } 반환
+function pickHighlightColors(el, win = window) {
+  const DARK  = hslToHex(HL_HUE, 78, 30); // 어두운 보라 — 밝은 배경용
+  const LIGHT = hslToHex(HL_HUE, 85, 78); // 밝은 라벤더 — 어두운 배경용
+
+  const bgLum    = relativeLuminance(getEffectiveBackground(el, win));
+  const darkLum  = relativeLuminance(hexToRgbArray(DARK));
+  const lightLum = relativeLuminance(hexToRgbArray(LIGHT));
+
+  const hex = contrastRatio(bgLum, darkLum) >= contrastRatio(bgLum, lightLum) ? DARK : LIGHT;
+  const lum = hex === DARK ? darkLum : lightLum;
+  const [r, g, b] = hexToRgbArray(hex);
+
+  return {
+    color:     hex,
+    bgColor:   `rgba(${r}, ${g}, ${b}, 0.12)`,
+    textColor: lum > 0.35 ? '#1a1a1a' : '#ffffff',
+  };
 }
 
 // ─── 민감정보 마스킹 ──────────────────────────────────────────────────────────
@@ -462,15 +492,15 @@ function ensureHighlightStyles(doc) {
   style.id    = 'guider-hl-styles';
   style.textContent = `
     .${HIGHLIGHT_CLASS} {
-      outline: 2px solid var(--guider-hl-color, ${HL_COLOR}) !important;
+      outline: 2px solid var(--guider-hl-color, ${hslToHex(HL_HUE, 78, 30)}) !important;
       outline-offset: 2px            !important;
       background-color: var(--guider-hl-bg-color, rgba(123, 47, 247, 0.1)) !important;
       transition: outline 0.15s ease !important;
     }
     .${TOOLTIP_CLASS} {
       position:      fixed;
-      background:    var(--guider-hl-color, ${HL_COLOR});
-      color:         #fff;
+      background:    var(--guider-hl-color, ${hslToHex(HL_HUE, 78, 30)});
+      color:         var(--guider-hl-text-color, #fff);
       padding:       4px 10px;
       border-radius: 6px;
       font-size:     12px;
@@ -486,8 +516,8 @@ function ensureHighlightStyles(doc) {
       width:           20px;
       height:          20px;
       border-radius:   50%;
-      background:      var(--guider-hl-color, ${HL_COLOR});
-      color:            #fff;
+      background:      var(--guider-hl-color, ${hslToHex(HL_HUE, 78, 30)});
+      color:           var(--guider-hl-text-color, #fff);
       font-size:        12px;
       font-weight:      700;
       font-family:      -apple-system, BlinkMacSystemFont, sans-serif;
@@ -597,13 +627,11 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
     return null; // 아직 숨겨져 있어 위치를 계산할 수 없음
   }
 
-  // 요소 주변 실제 배경색과 대비되는 색을 골라 el/tooltip/badge에 전부 적용합니다.
-  const win      = doc.defaultView || window;
-  const hlColor  = pickHighlightColor(el, win);
-  const [r, g, b] = hexToRgb(hlColor);
-  const hlBgColor = `rgba(${r}, ${g}, ${b}, 0.1)`;
-  el.style.setProperty('--guider-hl-color', hlColor);
-  el.style.setProperty('--guider-hl-bg-color', hlBgColor);
+  const win = doc.defaultView || window;
+  const { color, bgColor, textColor } = pickHighlightColors(el, win);
+  el.style.setProperty('--guider-hl-color',      color);
+  el.style.setProperty('--guider-hl-bg-color',   bgColor);
+  el.style.setProperty('--guider-hl-text-color', textColor);
 
   const rect = getAbsoluteRect(el, chain);
   // 사이드바처럼 화면 가장자리에 붙은 요소는 배지를 -10px 띄우면 화면 밖으로 잘리므로 클램프
@@ -615,7 +643,8 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
   tooltip.textContent = multiStep ? `Step ${i + 1}` : '여기를 찾아보세요';
   tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
   tooltip.style.left  = `${Math.max(4, rect.left)}px`;
-  tooltip.style.setProperty('--guider-hl-color', hlColor);
+  tooltip.style.setProperty('--guider-hl-color',      color);
+  tooltip.style.setProperty('--guider-hl-text-color', textColor);
   document.body.appendChild(tooltip);
 
   let badge = null;
@@ -625,7 +654,8 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
     badge.textContent = String(i + 1);
     badge.style.top   = `${clampedTop}px`;
     badge.style.left  = `${clampedLeft}px`;
-    badge.style.setProperty('--guider-hl-color', hlColor);
+    badge.style.setProperty('--guider-hl-color',      color);
+    badge.style.setProperty('--guider-hl-text-color', textColor);
     document.body.appendChild(badge);
   }
 
@@ -637,6 +667,7 @@ function removeStepMarkers(marker) {
   marker.el.classList.remove(HIGHLIGHT_CLASS);
   marker.el.style.removeProperty('--guider-hl-color');
   marker.el.style.removeProperty('--guider-hl-bg-color');
+  marker.el.style.removeProperty('--guider-hl-text-color');
   marker.tooltip?.remove();
   marker.badge?.remove();
 }
