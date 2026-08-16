@@ -657,10 +657,11 @@ export function highlightAnchors(anchors, onStepComplete) {
 
     if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // 단계가 1개뿐이어도(anchors.length === 1) 완료 처리는 동일하게 합니다.
-    // 배지/"Step N" 텍스트만 multiStep일 때 표시할 뿐, 완료 체크는 항상 필요합니다.
-    // 클릭형 메뉴뿐 아니라 :hover로만 펼쳐지는 메뉴도 있어, click과 mouseenter
-    // 둘 다 "사용자가 실제로 상호작용했다"는 신호로 받아들여 다음 단계로 넘어갑니다.
+    // 중간 단계(다음 단계를 펼치기 위한 메뉴 트리거)는 클릭이든 호버든 실제
+    // 상호작용이면 다음 단계로 넘어갑니다. 하지만 마지막 단계는 "펼치는 용도"가
+    // 아니라 사용자가 실제로 이동/실행해야 하는 최종 목적지이므로, 지나가다
+    // 마우스가 스치기만 해도 완료 처리되면 안 됩니다 — 반드시 클릭해야 완료됩니다.
+    const isFinalStep = i === anchors.length - 1;
     let advanced = false;
     function onStepAdvance() {
       if (advanced) return;
@@ -673,7 +674,7 @@ export function highlightAnchors(anchors, onStepComplete) {
       setTimeout(() => revealStep(i + 1), 300);
     }
     marker.el.addEventListener('click', onStepAdvance);
-    marker.el.addEventListener('mouseenter', onStepAdvance);
+    if (!isFinalStep) marker.el.addEventListener('mouseenter', onStepAdvance);
   }
 
   revealStep(0);
