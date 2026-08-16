@@ -47,9 +47,40 @@ Rules:
 - Elements marked [hidden menu] are currently invisible dropdown/submenu items. If such an element is the destination, put its visible parent menu first in anchors, then the hidden item.
 - Elements marked [hidden menu: click "X" first] require clicking X to reveal them. Put X first in anchors, then the target element.
 - When the user's question and UI labels differ (e.g. "grade" → "성적현황", "my info" → "마이페이지"), choose the semantically closest element.
-- Never recommend using a search function or navigating to an external link.
+- Never recommend using a search function or navigating to an external link. This includes any element whose text/aria-label is a generic search trigger (e.g. "검색", "통합검색"), even if it merely opens a menu layer — pick a non-search navigation element instead (e.g. a hamburger/전체메뉴 button), or if none exists, respond with "notfound".
+- Prefer "navigate" over "notfound" whenever a relevant category/menu clearly exists in the element list, even if it cannot guarantee the exact filtered answer (e.g. a specific neighborhood/date/item). Guiding the user to the closest relevant page is more useful than giving up — mention the uncertainty in "reason", but still provide anchors. Only use "notfound" when no relevant menu or page exists at all.
+- The "reason" field must describe exactly the elements listed in "anchors", in the same order — never mention a different menu or element than what anchors points to.
 - The "reason" field must always be written in Korean.
 - Output JSON only — absolutely no other text.`;
+
+// ─── 응답 JSON 스키마 (Structured Outputs) ──────────────────────────────────────
+// 프롬프트로 "JSON만 출력"을 지시해도 모델이 설명 문장을 앞에 붙이는 경우가 있어,
+// output_config.format으로 응답 형식 자체를 강제합니다.
+const RESPONSE_SCHEMA = {
+  type:       'object',
+  properties: {
+    type: {
+      type: 'string',
+      enum: ['navigate', 'found', 'notfound'],
+    },
+    anchors: {
+      type:  'array',
+      items: {
+        type:       'object',
+        properties: {
+          id:        { type: 'string' },
+          ariaLabel: { type: 'string' },
+          text:      { type: 'string' },
+        },
+        required:             ['id', 'ariaLabel', 'text'],
+        additionalProperties: false,
+      },
+    },
+    reason: { type: 'string' },
+  },
+  required:             ['type', 'anchors', 'reason'],
+  additionalProperties: false,
+};
 
 // ─── 유틸 함수 ────────────────────────────────────────────────────────────────
 
@@ -141,6 +172,18 @@ app.post('/api/query', async (req, res) => {
     const response = await claude.messages.create({
       model:      MODEL,
       max_tokens: 1024,
+      // claude-sonnet-5부터 thinking이 기본 활성화되어, 짧은 max_tokens 예산 안에서
+      // 추론만 하다 실제 답변 text 블록을 못 쓰고 잘리는 문제가 있어 명시적으로 끕니다.
+      // 이 작업은 정해진 JSON 포맷 분류라 thinking이 크게 도움되지 않습니다.
+      thinking: { type: 'disabled' },
+      // 프롬프트로 "JSON만 출력해"라고 지시해도 모델이 가끔 설명 문장을 앞에 붙여
+      // JSON.parse가 깨지는 경우가 있어, 응답 형식 자체를 스키마로 강제합니다.
+      output_config: {
+        format: {
+          type:   'json_schema',
+          schema: RESPONSE_SCHEMA,
+        },
+      },
       system: [
         {
           type:          'text',
@@ -154,8 +197,14 @@ app.post('/api/query', async (req, res) => {
     });
 
     // Claude가 반환한 텍스트를 JSON으로 파싱
+    // claude-sonnet-5부터는 thinking이 기본 활성화되어 content[0]이 text가 아닐 수 있으므로
+    // type이 'text'인 블록을 명시적으로 찾습니다.
     // 모델이 간혹 ```json ... ``` 마크다운 블록으로 감싸는 경우를 제거합니다.
-    const rawText   = response.content[0].text.trim();
+    const textBlock = response.content.find(block => block.type === 'text');
+    if (!textBlock) {
+      throw new Error('Claude 응답에 text 블록이 없습니다.');
+    }
+    const rawText   = textBlock.text.trim();
     const jsonText  = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     console.log('[Claude 응답]', jsonText.slice(0, 200));
     const result    = JSON.parse(jsonText);

@@ -122,7 +122,7 @@ const INTERACTIVE_SELECTOR = [
 ].join(', ');
 
 // 단일 document에서 인터랙티브 요소를 최대 limit개 추출합니다.
-function extractFromDoc(doc, win, limit = 100) {
+function extractFromDoc(doc, win, limit = 400) {
   const nodes    = doc.querySelectorAll(INTERACTIVE_SELECTOR);
   const elements = [];
 
@@ -262,13 +262,18 @@ function collectFrameDocs(doc, win, depth = 0, path = 'top', chain = [], acc = [
  * extractElements/extractPageText 호출 전에 waitForIframesReady()로
  * iframe 로딩을 기다려야 콘텐츠가 채워진 상태를 읽을 수 있습니다.
  */
+// 세종시청처럼 상단 네비 + "전체메뉴" 모달까지 합치면 인터랙티브 요소가
+// 100개를 훌쩍 넘는 대형 포털 사이트가 있어, 뒤쪽에 있는 메뉴 항목이
+// 잘려서 AI에게 전달조차 안 되는 문제가 있었습니다. 400으로 상향합니다.
+const MAX_ELEMENTS = 400;
+
 export function extractElements() {
   const frames = collectFrameDocs(document, window);
   const elements = [];
 
   for (const { doc, win, path } of frames) {
-    if (elements.length >= 100) break;
-    const found = extractFromDoc(doc, win, 100 - elements.length);
+    if (elements.length >= MAX_ELEMENTS) break;
+    const found = extractFromDoc(doc, win, MAX_ELEMENTS - elements.length);
     if (found.length > 0) {
       console.log(`[Guider] 요소 추출 (${path}):`, found.length, '개');
     }
@@ -419,7 +424,7 @@ function ensureHighlightStyles(doc) {
   doc.head.appendChild(style);
 }
 
-function findElementInDoc(doc, anchor) {
+function findElementInDoc(doc, anchor, win = window) {
   if (anchor.id) {
     const el = doc.getElementById(anchor.id);
     if (el) return el;
@@ -432,15 +437,30 @@ function findElementInDoc(doc, anchor) {
     const candidates = doc.querySelectorAll(
       'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]',
     );
+    // PC/모바일 중복 마크업 등으로 같은 텍스트를 가진 요소가 여러 개 있을 수 있어,
+    // "지금 실제로 보이는" 요소를 우선 채택합니다. 완전히 안 보이는 요소만 있으면
+    // (숨긴 조상을 revealStep에서 강제로 펼치는 시나리오를 위해) 폴백으로 반환합니다.
+    let exactHidden   = null;
+    let partialHidden = null;
+
     // 1. 표준 인터랙티브 요소 — 정확히 일치
     for (const el of candidates) {
-      if ((el.innerText || el.value || '').trim() === anchor.text) return el;
+      if ((el.innerText || el.value || '').trim() === anchor.text) {
+        if (isVisible(el, win)) return el;
+        if (!exactHidden) exactHidden = el;
+      }
     }
     // 2. 표준 인터랙티브 요소 — 부분 포함
     for (const el of candidates) {
       const t = (el.innerText || el.value || '').trim();
-      if (t && anchor.text.includes(t)) return el;
+      if (t && anchor.text.includes(t)) {
+        if (isVisible(el, win)) return el;
+        if (!partialHidden) partialHidden = el;
+      }
     }
+    if (exactHidden)   return exactHidden;
+    if (partialHidden) return partialHidden;
+
     // 3. 비표준 클릭 요소(div/li 아코디언 트리거 등) — 직접 텍스트만 가진 leaf 요소로 제한
     const broad = doc.querySelectorAll('div, li, span, dt, th, td');
     for (const el of broad) {
@@ -458,8 +478,8 @@ function findElementInDoc(doc, anchor) {
  * iframe/frame 요소 목록으로, 화면 좌표 변환에 사용됩니다.
  */
 function findElement(anchor) {
-  for (const { doc, chain } of collectFrameDocs(document, window)) {
-    const el = findElementInDoc(doc, anchor);
+  for (const { doc, win, chain } of collectFrameDocs(document, window)) {
+    const el = findElementInDoc(doc, anchor, win);
     if (el) return { el, doc, chain };
   }
   return null;
@@ -560,27 +580,39 @@ export function highlightAnchors(anchors, onStepComplete) {
     const { el, doc, chain } = found;
     const marker = drawStepMarkers(el, doc, chain, i, multiStep);
 
+    // 강제로 메뉴를 열어버리지 않습니다 — Guider는 "어디를 클릭/호버해야 하는지"만
+    // 알려주고, 실제 상호작용은 사용자가 직접 하도록 둡니다. 지금 안 보이면
+    // 사용자가 이전 단계를 실제로 클릭/호버해서 펼치길 기다렸다가 재탐색합니다.
     if (!marker) {
       if (retriesLeft <= 0) {
         console.log('[Guider] 요소가 계속 숨겨져 있어 재탐색 포기:', anchors[i]);
         return;
       }
       console.log('[Guider] 요소가 아직 숨겨져 있어 배지/툴팁 생략(펼치면 자동 재탐색):', anchors[i]);
-      // 지금은 안 보이지만, 클릭으로 펼쳐질 수 있으니 잠시 후 한 번 더 시도합니다.
+      // 지금은 안 보이지만, 클릭/호버로 펼쳐질 수 있으니 잠시 후 한 번 더 시도합니다.
       setTimeout(() => revealStep(i, retriesLeft - 1), 600);
       return;
     }
 
     if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // 단계가 1개뿐이어도(anchors.length === 1) 클릭하면 완료 처리는 동일하게 합니다.
+    // 단계가 1개뿐이어도(anchors.length === 1) 완료 처리는 동일하게 합니다.
     // 배지/"Step N" 텍스트만 multiStep일 때 표시할 뿐, 완료 체크는 항상 필요합니다.
-    marker.el.addEventListener('click', function onStepClick() {
+    // 클릭형 메뉴뿐 아니라 :hover로만 펼쳐지는 메뉴도 있어, click과 mouseenter
+    // 둘 다 "사용자가 실제로 상호작용했다"는 신호로 받아들여 다음 단계로 넘어갑니다.
+    let advanced = false;
+    function onStepAdvance() {
+      if (advanced) return;
+      advanced = true;
+      marker.el.removeEventListener('click', onStepAdvance);
+      marker.el.removeEventListener('mouseenter', onStepAdvance);
       removeStepMarkers(marker);
       onStepComplete?.(i);
-      // 클릭으로 아코디언이 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
+      // 상호작용으로 메뉴가 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
       setTimeout(() => revealStep(i + 1), 300);
-    }, { once: true });
+    }
+    marker.el.addEventListener('click', onStepAdvance);
+    marker.el.addEventListener('mouseenter', onStepAdvance);
   }
 
   revealStep(0);
