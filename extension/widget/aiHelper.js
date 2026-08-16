@@ -418,6 +418,37 @@ export async function callAI(question, elements, pageText = '', headings = []) {
   }
 }
 
+/**
+ * 위젯 IDLE 화면에 보여줄 예시 질문 2개를 현재 페이지 구조 기반으로 받아옵니다.
+ * 실패해도(네트워크 오류, 타임아웃 등) 위젯 초기 화면이 깨지면 안 되므로,
+ * 호출하는 쪽(ChatWidget)에서 실패 시 기본 예시로 조용히 폴백합니다.
+ */
+export async function fetchExamples(elements, headings = []) {
+  const controller = new AbortController();
+  const timer      = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/examples`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        elements,
+        headings,
+        url: window.location.href,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+    const body = await response.json();
+    return Array.isArray(body.examples) && body.examples.length > 0 ? body.examples : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── 하이라이트 ───────────────────────────────────────────────────────────────
 // extractElements와 마찬가지로 anchor가 top이 아니라 중첩된 frame/iframe 안의
 // 요소를 가리킬 수 있으므로, 하이라이트도 collectFrameDocs로 모든 프레임을 뒤집니다.

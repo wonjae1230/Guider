@@ -82,6 +82,32 @@ const RESPONSE_SCHEMA = {
   additionalProperties: false,
 };
 
+// ─── IDLE 화면 예시 질문 생성용 프롬프트/스키마 ─────────────────────────────────
+// 위젯을 처음 열었을 때 보여주는 "예시: OOO 어떻게 해?" 문구를, 정적인 문구 대신
+// 현재 페이지의 메뉴/헤딩 구조를 보고 그 사이트에 맞게 생성합니다.
+const EXAMPLES_SYSTEM_PROMPT = `You suggest example questions for an AI page-guide widget, based on the current web page's structure.
+You are given the page's heading structure and a list of interactive DOM elements (menu/nav items, buttons, links).
+Generate exactly 2 short, natural example questions a real visitor of this specific site might ask the guide.
+
+Rules:
+- Base each question on a menu/nav label or heading that actually appears in the provided elements/headings — never invent a feature that isn't there.
+- Prefer common, practical tasks a visitor would realistically want (login, application/registration status, contact info, schedules, fees) over obscure ones.
+- Phrase each question in casual, natural Korean (반말/해요체), matching this style: "로그인하려면 어떻게 해?", "여권 발급일 확인해줘". Keep each under ~20 characters.
+- The two questions must be about clearly different topics/menus of the site, not near-duplicates.
+- Output JSON only — absolutely no other text.`;
+
+const EXAMPLES_SCHEMA = {
+  type:       'object',
+  properties: {
+    examples: {
+      type:  'array',
+      items: { type: 'string' },
+    },
+  },
+  required:             ['examples'],
+  additionalProperties: false,
+};
+
 // ─── 유틸 함수 ────────────────────────────────────────────────────────────────
 
 /**
@@ -223,6 +249,90 @@ app.post('/api/query', async (req, res) => {
     console.error('[Claude API] 오류:', apiError.message);
     return res.status(500).json({
       error:   'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      message: apiError.message,
+    });
+  }
+});
+
+// ─── /api/examples 엔드포인트 ─────────────────────────────────────────────────
+
+/**
+ * POST /api/examples
+ *
+ * Body: { elements: Array, url: string, headings?: Array }
+ *
+ * 위젯 IDLE 화면에 보여줄 예시 질문 2개를 현재 페이지 구조 기반으로 생성합니다.
+ * pageText는 필요 없음(메뉴/헤딩 구조만으로 충분하고 토큰도 절약됨).
+ * URL 단위로 캐싱하므로, 같은 페이지 재방문 시 API를 다시 호출하지 않습니다.
+ */
+app.post('/api/examples', async (req, res) => {
+  const { elements, url, headings = [] } = req.body;
+
+  if (!elements || !url) {
+    return res.status(400).json({ error: '필수 파라미터(elements, url)가 누락되었습니다.' });
+  }
+
+  const cacheKey = `examples::${url}`;
+
+  try {
+    await connectRedis();
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      console.log(`[캐시 히트] ${cacheKey.slice(0, 80)}...`);
+      return res.json({ ...cached, cached: true });
+    }
+  } catch (cacheError) {
+    console.warn('[캐시] Redis 조회 실패, Claude API로 계속 진행합니다:', cacheError.message);
+  }
+
+  let userMessage = '';
+  if (headings.length > 0) {
+    userMessage += `페이지 구조:\n${headings.join('\n')}\n\n`;
+  }
+  userMessage += `인터랙티브 요소 목록:\n${formatElements(elements)}`;
+
+  try {
+    const response = await claude.messages.create({
+      model:      MODEL,
+      max_tokens: 512,
+      thinking:   { type: 'disabled' },
+      output_config: {
+        format: {
+          type:   'json_schema',
+          schema: EXAMPLES_SCHEMA,
+        },
+      },
+      system: [
+        {
+          type:          'text',
+          text:          EXAMPLES_SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      messages: [
+        { role: 'user', content: userMessage },
+      ],
+    });
+
+    const textBlock = response.content.find(block => block.type === 'text');
+    if (!textBlock) {
+      throw new Error('Claude 응답에 text 블록이 없습니다.');
+    }
+    const result = JSON.parse(textBlock.text.trim());
+    result.examples = (result.examples || []).slice(0, 2);
+
+    try {
+      await setCache(cacheKey, result);
+    } catch (cacheError) {
+      console.warn('[캐시] Redis 저장 실패:', cacheError.message);
+    }
+
+    return res.json(result);
+
+  } catch (apiError) {
+    console.error('[Claude API] 예시 질문 생성 오류:', apiError.message);
+    return res.status(500).json({
+      error:   '예시 질문 생성에 실패했습니다.',
       message: apiError.message,
     });
   }
