@@ -9,8 +9,94 @@ const BACKEND_URL    = 'http://localhost:3000';
 const HIGHLIGHT_CLASS = 'guider-hl';
 const TOOLTIP_CLASS   = 'guider-tt';
 
-// 하이라이트 색상: 위젯 브랜드 컬러(보라)와 통일
-const HL_COLOR = '#7b2ff7';
+// ─── 페이지 보색 계산 ─────────────────────────────────────────────────────────
+
+function _isTransparent(c) {
+  return !c || c === 'transparent' || c === 'rgba(0, 0, 0, 0)';
+}
+
+function _extractPrimaryColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta?.content) return meta.content;
+
+  const root = getComputedStyle(document.documentElement);
+  for (const v of ['--primary','--primary-color','--brand-color','--accent-color','--color-primary','--main-color','--theme-color']) {
+    const val = root.getPropertyValue(v).trim();
+    if (val) return val;
+  }
+
+  for (const sel of ['header','nav','.header','.navbar','.nav','.gnb','.lnb','#header','#nav','#gnb']) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const bg = getComputedStyle(el).backgroundColor;
+    if (!_isTransparent(bg)) return bg;
+  }
+  return null;
+}
+
+function _parseColor(color) {
+  if (!color) return null;
+  const m = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
+  if (color.startsWith('#')) {
+    let hex = color.slice(1);
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    if (hex.length >= 6) return { r: parseInt(hex.slice(0,2),16), g: parseInt(hex.slice(2,4),16), b: parseInt(hex.slice(4,6),16) };
+  }
+  return null;
+}
+
+function _rgbToHsl({ r, g, b }) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: l * 100 };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  switch (max) {
+    case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+    case g: h = ((b - r) / d + 2) / 6; break;
+    case b: h = ((r - g) / d + 4) / 6; break;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+function _hslToRgb(h, s, l) {
+  h /= 360; s /= 100; l /= 100;
+  if (s === 0) { const v = Math.round(l * 255); return { r: v, g: v, b: v }; }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const hue2rgb = t => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q-p)*6*t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q-p)*(2/3-t)*6;
+    return p;
+  };
+  return { r: Math.round(hue2rgb(h+1/3)*255), g: Math.round(hue2rgb(h)*255), b: Math.round(hue2rgb(h-1/3)*255) };
+}
+
+function _computeHighlightColor() {
+  const FALLBACK = { solid: '#6366f1', alpha: 'rgba(99,102,241,0.12)', text: '#ffffff' };
+  const primary = _extractPrimaryColor();
+  if (!primary) return FALLBACK;
+  const rgb = _parseColor(primary);
+  if (!rgb) return FALLBACK;
+  const hsl = _rgbToHsl(rgb);
+  if (hsl.s < 10 || hsl.l > 88 || hsl.l < 12) return FALLBACK;
+  const compH = (hsl.h + 180) % 360;
+  const compS = Math.max(hsl.s, 65);
+  const compL = Math.max(42, Math.min(56, hsl.l));
+  const { r, g, b } = _hslToRgb(compH, compS, compL);
+  return {
+    solid: `rgb(${r},${g},${b})`,
+    alpha: `rgba(${r},${g},${b},0.12)`,
+    text:  compL > 52 ? '#1a1a1a' : '#ffffff',
+  };
+}
+
+const HL_COLORS = _computeHighlightColor();
 
 // ─── 민감정보 마스킹 ──────────────────────────────────────────────────────────
 
@@ -47,6 +133,43 @@ function isVisible(el, win = window) {
   } catch {
     return true; // 확인 불가 시 포함(크로스오리진 등)
   }
+}
+
+// aria-hidden="true" 조상이 있는 요소는 스크린리더에서 완전히 제외되므로 건너뜁니다.
+function isAriaHidden(el) {
+  let node = el;
+  while (node && node !== document.documentElement) {
+    if (node.getAttribute('aria-hidden') === 'true') return true;
+    node = node.parentElement;
+  }
+  return false;
+}
+
+// ARIA Accessible Name and Description Computation 1.2 기준:
+// aria-labelledby → aria-label → <label for> → title → innerText 순서로 계산합니다.
+function getAccessibleName(el, doc) {
+  const labelledBy = el.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const name = labelledBy.split(/\s+/)
+      .map(id => doc.getElementById(id))
+      .filter(Boolean)
+      .map(ref => (ref.textContent || '').trim())
+      .join(' ')
+      .trim();
+    if (name) return name;
+  }
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel?.trim()) return ariaLabel.trim();
+  if (el.id) {
+    const label = doc.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (label) {
+      const name = (label.textContent || '').trim();
+      if (name) return name;
+    }
+  }
+  const title = el.getAttribute('title');
+  if (title?.trim()) return title.trim();
+  return (el.innerText || el.value || el.textContent || '').trim().replace(/\s+/g, ' ');
 }
 
 /**
@@ -128,6 +251,7 @@ function extractFromDoc(doc, win, limit = 100) {
 
   for (const node of nodes) {
     if (node.getAttribute('type') === 'password') continue;
+    if (isAriaHidden(node)) continue;
 
     // 성적정보 > 금학기성적조회처럼 <ul style="display:none">에 감춰진 요소는
     // isVisible()이 false를 반환해 예전엔 통째로 제외됐습니다. 지금은 제외하지 않고,
@@ -140,25 +264,20 @@ function extractFromDoc(doc, win, limit = 100) {
       const trigger = hiddenAncestor ? findRevealTrigger(hiddenAncestor, win) : null;
       if (!trigger) continue; // 트리거조차 못 찾으면 안내가 불가능하므로 제외
 
-      const triggerText = (trigger.innerText || trigger.value || trigger.textContent || '').trim();
       revealBy = {
-        id:        trigger.id                         || '',
-        ariaLabel: maskText(trigger.getAttribute('aria-label')),
-        text:      maskText(triggerText.slice(0, 100)),
+        id:        trigger.id || '',
+        ariaLabel: maskText(trigger.getAttribute('aria-label') || ''),
+        text:      maskText(getAccessibleName(trigger, doc).slice(0, 100)),
       };
     }
 
-    const rawText = (node.innerText || node.value || node.textContent || '')
-      .trim()
-      .replace(/\s+/g, ' ');
-
     elements.push({
       tag:       node.tagName.toLowerCase(),
-      id:        node.id                         || '',
-      ariaLabel: maskText(node.getAttribute('aria-label')),
-      role:      node.getAttribute('role')       || '',
-      text:      maskText(rawText.slice(0, 100)),
-      type:      node.getAttribute('type')       || '',
+      id:        node.id || '',
+      ariaLabel: maskText(node.getAttribute('aria-label') || ''),
+      role:      node.getAttribute('role') || '',
+      text:      maskText(getAccessibleName(node, doc).slice(0, 100)),
+      type:      node.getAttribute('type') || '',
       visible,
       revealBy,
     });
@@ -378,15 +497,15 @@ function ensureHighlightStyles(doc) {
   style.id    = 'guider-hl-styles';
   style.textContent = `
     .${HIGHLIGHT_CLASS} {
-      outline: 2px solid ${HL_COLOR} !important;
-      outline-offset: 2px            !important;
-      background-color: rgba(123, 47, 247, 0.1) !important;
-      transition: outline 0.15s ease !important;
+      outline: 2px solid ${HL_COLORS.solid} !important;
+      outline-offset: 2px                   !important;
+      background-color: ${HL_COLORS.alpha}  !important;
+      transition: outline 0.15s ease        !important;
     }
     .${TOOLTIP_CLASS} {
       position:      fixed;
-      background:    ${HL_COLOR};
-      color:         #fff;
+      background:    ${HL_COLORS.solid};
+      color:         ${HL_COLORS.text};
       padding:       4px 10px;
       border-radius: 6px;
       font-size:     12px;
@@ -402,8 +521,8 @@ function ensureHighlightStyles(doc) {
       width:           20px;
       height:          20px;
       border-radius:   50%;
-      background:      ${HL_COLOR};
-      color:            #fff;
+      background:      ${HL_COLORS.solid};
+      color:           ${HL_COLORS.text};
       font-size:        12px;
       font-weight:      700;
       font-family:      -apple-system, BlinkMacSystemFont, sans-serif;
