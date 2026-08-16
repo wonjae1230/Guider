@@ -331,7 +331,18 @@ export function extractPageText() {
 
 // ─── AI 호출 ─────────────────────────────────────────────────────────────────
 
-export async function callAI(question, elements, pageText = '', headings = []) {
+/**
+ * 백엔드 /api/query에 AI 안내 요청을 보냅니다.
+ *
+ * @param {string}  question    사용자 질문. clarify 재질의 시엔 "원본 질문\n(추가 설명: 답변)" 형태.
+ * @param {Array}   elements    extractElements()로 추출한 인터랙티브 요소 목록
+ * @param {string}  pageText    extractPageText()로 추출한 페이지 텍스트
+ * @param {Array}   headings    extractHeadings()로 추출한 헤딩 목록
+ * @param {boolean} isFollowUp  이전 "clarify" 응답에 대한 사용자의 답변 재질의인지 여부.
+ *                              true면 서버가 다시 clarify로 되묻지 않고 최종 답변을 강제합니다.
+ * @returns {Promise<{ type: string, anchors: Array, reason: string, options?: Array }>}
+ */
+export async function callAI(question, elements, pageText = '', headings = [], isFollowUp = false) {
   const controller = new AbortController();
   const timer      = setTimeout(() => controller.abort(), 15000);
 
@@ -344,6 +355,7 @@ export async function callAI(question, elements, pageText = '', headings = []) {
         elements,
         pageText,
         headings,
+        isFollowUp,
         url: window.location.href,
       }),
       signal: controller.signal,

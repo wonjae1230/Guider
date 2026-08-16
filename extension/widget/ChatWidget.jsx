@@ -43,7 +43,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
   // ── 공통 질문 처리 ─────────────────────────────────────────────────────────
   // handleSend와 자동 재실행 양쪽에서 호출되므로 분리합니다.
-  const triggerQuery = useCallback(async (question) => {
+  const triggerQuery = useCallback(async (question, isFollowUp = false) => {
     setValue("");
     setPhase(PHASE.LOADING);
     setResult(null);
@@ -56,7 +56,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       const elements = extractElements();
       const pageText = extractPageText();
       const headings = extractHeadings();
-      const aiResult = await callAI(question, elements, pageText, headings);
+      const aiResult = await callAI(question, elements, pageText, headings, isFollowUp);
 
       setResult(aiResult);
       setPhase(PHASE.RESULT);
@@ -171,11 +171,32 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   }, [triggerQuery]);
 
   // ── 입력 처리 ──────────────────────────────────────────────────────────────
+  // AI가 질문을 애매하다고 판단(type: 'clarify')했을 때, 사용자가 채팅 입력창에 쓴
+  // 추가 설명을 원래 질문에 이어붙여 다시 질의합니다(가지치기). 서버에는 isFollowUp=true를
+  // 보내 다시 clarify로 되묻지 않고 최종 답을 내도록 강제합니다.
+  const askClarifyFollowUp = useCallback(async (answer) => {
+    const combined = `${lastQuestion.current}\n(추가 설명: ${answer})`;
+    lastQuestion.current = combined;
+    await triggerQuery(combined, true);
+  }, [triggerQuery]);
+
   const handleSend = async () => {
-    const question = value.trim();
-    if (!question || phase === PHASE.LOADING) return;
-    lastQuestion.current = question;
-    await triggerQuery(question);
+    const input = value.trim();
+    if (!input || phase === PHASE.LOADING) return;
+
+    if (phase === PHASE.RESULT && resultType === 'clarify') {
+      await askClarifyFollowUp(input);
+      return;
+    }
+
+    lastQuestion.current = input;
+    await triggerQuery(input);
+  };
+
+  // clarify 응답의 옵션 버튼(예: "성적 조회" vs "출석 조회")을 탭했을 때
+  const handleOptionClick = (option) => {
+    if (phase === PHASE.LOADING) return;
+    askClarifyFollowUp(option);
   };
 
   const handleKeyDown = (e) => {
@@ -258,8 +279,31 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       {phase === PHASE.RESULT && result && (
         <div className="gd-body gd-body--result">
 
-          {/* type: found → 페이지에서 정보를 직접 찾은 경우 (이메일, 학점 등) */}
-          {resultType === 'found' ? (
+          {/* type: clarify → 질문이 애매해서 되물어야 하는 경우 (가지치기) */}
+          {resultType === 'clarify' ? (
+            <div className="gd-clarify-box">
+              <div className="gd-clarify-box__label">🤔 조금 더 알려주세요</div>
+              <p className="gd-clarify-box__text">{result.reason}</p>
+
+              {Array.isArray(result.options) && result.options.length > 0 && (
+                <div className="gd-clarify-options">
+                  {result.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className="gd-clarify-option"
+                      onClick={() => handleOptionClick(opt)}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className="gd-clarify-hint">또는 아래 입력창에 직접 답해 주세요.</p>
+            </div>
+          ) : resultType === 'found' ? (
+            /* type: found → 페이지에서 정보를 직접 찾은 경우 (이메일, 학점 등) */
             <div className="gd-info-box">
               <div className="gd-info-box__label">✓ 찾았어요!</div>
               <p className="gd-info-box__text">{result.reason}</p>
@@ -324,7 +368,11 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
             ref={textareaRef}
             className="gd-input"
             rows={1}
-            placeholder="어떤 것을 찾고 계신가요?"
+            placeholder={
+              phase === PHASE.RESULT && resultType === 'clarify'
+                ? '답변을 입력해 주세요...'
+                : '어떤 것을 찾고 계신가요?'
+            }
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
