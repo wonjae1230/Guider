@@ -43,7 +43,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
   // ── 공통 질문 처리 ─────────────────────────────────────────────────────────
   // handleSend와 자동 재실행 양쪽에서 호출되므로 분리합니다.
-  const triggerQuery = useCallback(async (question) => {
+  const triggerQuery = useCallback(async (question, selectedChoice=null) => {
     setValue("");
     setPhase(PHASE.LOADING);
     setResult(null);
@@ -56,7 +56,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       const elements = extractElements();
       const pageText = extractPageText();
       const headings = extractHeadings();
-      const aiResult = await callAI(question, elements, pageText, headings);
+      const aiResult = await callAI(question, elements, pageText, headings,selectedChoice);
 
       setResult(aiResult);
       setPhase(PHASE.RESULT);
@@ -178,6 +178,14 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     await triggerQuery(question);
   };
 
+  const handleChoiceSelect = async (choice) => {
+    const question = lastQuestion.current;
+
+    if (!question || phase === PHASE.LOADING) return;
+
+    await triggerQuery(question, choice);
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -199,6 +207,8 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const anchors    = result?.anchors ?? [];
   const hasAnchors = anchors.length > 0;
   // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
+  const choices = result?.choices ?? [];
+  const hasChoices = choices.length > 0;
   const resultType = result?.type ?? 'navigate';
   // 안내(투두리스트, 1단계여도 포함)의 모든 단계를 실제로 클릭 완료했는지
   const allStepsDone = anchors.length > 0 && completedSteps.size >= anchors.length;
@@ -268,7 +278,20 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
             <>
               {/* AI 안내 메시지 */}
               <p className="gd-result-reason">{result.reason}</p>
-
+              {resultType === 'clarify' && hasChoices && (
+                <div className="gd-examples">
+                  {choices.map((choice) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      className="gd-example"
+                      onClick={() => handleChoiceSelect(choice)}
+                    >
+                      <span className="gd-example__text">{choice.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* 안내 체크리스트: 단계가 1개여도 동일하게 표시. 실제 페이지에서
                   해당 요소를 클릭하면 완료 표시(취소선)됨 */}
               {hasAnchors && (
@@ -296,7 +319,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
               )}
 
               {/* 요소 미발견 */}
-              {!hasAnchors && (
+              {!hasAnchors && resultType !== 'clarify' &&(
                 <p className="gd-not-found">현재 페이지에서 해당 기능을 찾지 못했어요.</p>
               )}
             </>

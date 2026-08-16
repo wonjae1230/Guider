@@ -331,7 +331,7 @@ export function extractPageText() {
 
 // ─── AI 호출 ─────────────────────────────────────────────────────────────────
 
-export async function callAI(question, elements, pageText = '', headings = []) {
+export async function callAI(question, elements, pageText = '', headings = [], selectedChoice = null) {
   const controller = new AbortController();
   const timer      = setTimeout(() => controller.abort(), 15000);
 
@@ -344,6 +344,7 @@ export async function callAI(question, elements, pageText = '', headings = []) {
         elements,
         pageText,
         headings,
+        selectedChoice,
         url: window.location.href,
       }),
       signal: controller.signal,

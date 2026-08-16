@@ -140,6 +140,8 @@ app.post('/api/query', async (req, res) => {
   const gradeEl = elements.filter(el => el.text?.includes('성적') || el.text?.includes('grade'));
   if (gradeEl.length) console.log('[성적 관련 요소]', gradeEl.map(e => e.text));
 
+  let userMessage = `사용자 질문: ${question}\n\n`;
+  
   if (selectedChoice?.label) {
     userMessage += `사용자가 선택한 구체적인 의도: ${selectedChoice.label}\n\n`;
   }
