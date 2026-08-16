@@ -598,7 +598,7 @@ function findElement(anchor) {
  * 중첩 프레임 안 요소의 getBoundingClientRect()는 그 프레임 자신의 뷰포트 기준이므로,
  * chain에 있는 iframe/frame들의 위치를 top까지 누적해서 top 뷰포트 기준 좌표로 변환합니다.
  */
-function getAbsoluteRect(el, chain) {
+export function getAbsoluteRect(el, chain) {
   const rect = el.getBoundingClientRect();
   let top    = rect.top;
   let left   = rect.left;
@@ -609,7 +609,14 @@ function getAbsoluteRect(el, chain) {
     left += frameRect.left;
   }
 
-  return { top, left, bottom: top + rect.height };
+  return {
+    top,
+    left,
+    right:  left + rect.width,
+    bottom: top + rect.height,
+    width:  rect.width,
+    height: rect.height,
+  };
 }
 
 /**
@@ -659,7 +666,7 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
     document.body.appendChild(badge);
   }
 
-  return { el, tooltip, badge };
+  return { el, tooltip, badge, rect };
 }
 
 function removeStepMarkers(marker) {
@@ -681,8 +688,13 @@ function removeStepMarkers(marker) {
  *
  * onStepComplete(index)는 anchors[index]에 해당하는 요소를 사용자가 실제로
  * 클릭했을 때 호출됩니다 (ChatWidget이 체크리스트 UI를 갱신하는 데 사용).
+ *
+ * onStepVisible(el, chain)은 각 단계의 타겟 요소가 실제로 화면에 배지/툴팁과 함께
+ * 나타날 때마다 호출됩니다 (ChatWidget이 위젯 카드에 가려지는지 판단해 필요하면
+ * 위젯을 접어주는 데 사용). chain은 getAbsoluteRect(el, chain)으로 중첩 프레임 안
+ * 요소도 top 문서 기준 절대좌표를 구할 수 있게 하기 위해 함께 넘깁니다.
  */
-export function highlightAnchors(anchors, onStepComplete) {
+export function highlightAnchors(anchors, onStepComplete, onStepVisible) {
   clearHighlights();
 
   // 툴팁/배지는 항상 top 문서의 body에 붙으므로, top 문서에도 스타일이 있어야 합니다.
@@ -718,6 +730,11 @@ export function highlightAnchors(anchors, onStepComplete) {
     }
 
     if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // el과 chain을 그대로 넘깁니다. scrollIntoView가 끝나기 전이라 지금 시점의
+    // 좌표는 곧 낡은 값이 되므로, 호출 쪽에서 스크롤이 끝난 뒤 getAbsoluteRect(el, chain)로
+    // 다시 재야 합니다 (중첩 프레임 안 요소는 el.getBoundingClientRect()만으로는
+    // top 문서 기준 좌표가 나오지 않습니다).
+    onStepVisible?.(el, chain);
 
     // 마지막 단계는 "펼치는 용도"가 아니라 사용자가 실제로 이동/실행해야 하는
     // 최종 목적지이므로, 지나가다 마우스가 스치기만 해도 완료되면 안 됩니다 —

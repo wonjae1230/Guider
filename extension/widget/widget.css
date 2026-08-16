@@ -73,6 +73,43 @@ img {
   object-fit: contain;
 }
 
+/* 안내 대상 요소가 카드에 가려져 자동으로 접혔을 때: 진행 중인 안내가
+   있다는 걸 알 수 있도록 은은하게 계속 퍼지는 점을 붙입니다. */
+.gd-launcher--minimized {
+  position: relative;
+}
+
+.gd-launcher__pulse {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
+.gd-launcher__pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: gd-pulse-ring 1.6s ease-out infinite;
+}
+
+@keyframes gd-pulse-ring {
+  0%   { transform: scale(1);   opacity: 0.6; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gd-launcher__pulse::after {
+    animation: none;
+  }
+}
+
 /* Card */
 .gd-card {
   width: 400px;

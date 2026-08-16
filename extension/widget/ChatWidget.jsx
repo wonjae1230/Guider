@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "../assets/icons/icon128.png";
 import { CloseIcon, MicIcon, SendIcon } from "./icons.jsx";
 import { useSpeechToText } from "./useSpeechToText.js";
-import { extractElements, extractPageText, extractHeadings, callAI, fetchExamples, highlightAnchors, clearHighlights, waitForIframesReady } from "./aiHelper.js";
+import { extractElements, extractPageText, extractHeadings, callAI, fetchExamples, highlightAnchors, clearHighlights, waitForIframesReady, getAbsoluteRect } from "./aiHelper.js";
 
 // 페이지별 예시 질문을 못 받아왔을 때(네트워크 오류 등) 보여줄 기본값
 const DEFAULT_EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
@@ -103,6 +103,8 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // 로딩 중엔 스켈레톤을 보여주고 AI 예시가 도착한 뒤에야 실제 버튼을 표시합니다.
   const [examples, setExamples] = useState(DEFAULT_EXAMPLES);
   const [examplesLoading, setExamplesLoading] = useState(true);
+  // 안내 중인 요소가 위젯 카드 뒤에 가려질 때 카드를 잠깐 접어 보여줄지 여부
+  const [minimized, setMinimized] = useState(false);
   const textareaRef  = useRef(null);
   const lastQuestion = useRef('');
   // stale closure 방지: URL 변경 이벤트 핸들러에서 최신 state를 읽기 위한 refs
@@ -115,6 +117,8 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const completedStepsRef = useRef(new Set());
   // 대화 스크롤 영역: 새 턴이 추가되면 맨 아래로 자동 스크롤합니다.
   const bodyRef = useRef(null);
+  // 카드 자체의 위치/크기를 재서 안내 대상 요소와 겹치는지 판단하는 데 씁니다.
+  const cardRef = useRef(null);
 
   useEffect(() => { phaseRef.current  = phase;  }, [phase]);
   useEffect(() => { resultRef.current = result; }, [result]);
@@ -148,6 +152,31 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   const { isSupported: isMicSupported, isListening, toggleListening } =
     useSpeechToText(setValue);
 
+  // 안내 대상 요소가 나타날 때마다 호출됩니다. 위젯 카드(우하단 고정)에
+  // 가려지는 위치라면 카드를 잠깐 접어 실제 페이지 요소를 클릭할 수 있게 합니다.
+  //
+  // el.getBoundingClientRect()를 바로 쓰지 않고 getAbsoluteRect(el, chain)로
+  // 다시 재는 이유: 요소가 중첩 iframe 안에 있으면 el 자신의 rect는 그 프레임
+  // 내부 좌표라서, top 문서 기준으로 떠 있는 위젯 카드와 좌표계가 달라 비교가
+  // 틀어집니다. 또한 첫 단계는 scrollIntoView(smooth)가 걸려 있어 즉시 재면
+  // 스크롤이 끝나기 전 좌표를 잡으므로, 카드가 다시 펼쳐지고 스크롤 애니메이션도
+  // 끝날 만큼 잠깐 기다린 뒤에 측정합니다.
+  const handleStepVisible = useCallback((el, chain) => {
+    setMinimized(false);
+    setTimeout(() => {
+      if (!cardRef.current || !el) return;
+      const cardRect = cardRef.current.getBoundingClientRect();
+      const elRect   = getAbsoluteRect(el, chain);
+      const overlaps = !(
+        elRect.right  < cardRect.left  ||
+        elRect.left   > cardRect.right ||
+        elRect.bottom < cardRect.top   ||
+        elRect.top    > cardRect.bottom
+      );
+      if (overlaps) setMinimized(true);
+    }, 350);
+  }, []);
+
   // ── 공통 질문 처리 ─────────────────────────────────────────────────────────
   // handleSend와 자동 재실행 양쪽에서 호출되므로 분리합니다.
   const triggerQuery = useCallback(async (question) => {
@@ -167,6 +196,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setResult(null);
     setError("");
     setCompletedSteps(new Set());
+    setMinimized(false);
     clearHighlights();
 
     try {
@@ -183,7 +213,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       if (aiResult.anchors?.length > 0) {
         highlightAnchors(aiResult.anchors, (i) => {
           setCompletedSteps((prev) => new Set(prev).add(i));
-        });
+        }, handleStepVisible);
       }
 
       // navigate 타입이면 다음 페이지 이동 후 자동 재실행할 수 있도록 저장
@@ -338,6 +368,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setResult(null);
     setError("");
     setCompletedSteps(new Set());
+    setMinimized(false);
     setTurnHistory([]);
     historyRef.current        = [];
     resultRef.current         = null;
@@ -346,8 +377,25 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
+  // 안내 대상 요소가 카드 뒤에 가려질 때: 대화 상태는 그대로 유지한 채
+  // 작은 아이콘으로 접어서 실제 페이지 요소를 클릭할 수 있게 비켜줍니다.
+  if (minimized) {
+    return (
+      <button
+        type="button"
+        className="gd-launcher gd-launcher--minimized"
+        onClick={() => setMinimized(false)}
+        aria-label="가려진 안내 대상이 있어요 · 클릭해서 Guider 다시 보기"
+        {...dragHandleProps}
+      >
+        <img src={logo} alt="" draggable="false" />
+        <span className="gd-launcher__pulse" aria-hidden="true" />
+      </button>
+    );
+  }
+
   return (
-    <div className="gd-card">
+    <div className="gd-card" ref={cardRef}>
       <header className="gd-header" {...dragHandleProps}>
         <div className="gd-header__brand">
           <img className="gd-header__logo" src={logo} alt="" draggable="false" />
