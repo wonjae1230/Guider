@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "../assets/icons/icon128.png";
 import { CloseIcon, MicIcon, SendIcon } from "./icons.jsx";
 import { useSpeechToText } from "./useSpeechToText.js";
-import { extractElements, extractPageText, extractHeadings, callAI, highlightAnchors, clearHighlights, waitForIframesReady } from "./aiHelper.js";
+import { extractElements, extractPageText, extractHeadings, callAI, fetchExamples, highlightAnchors, clearHighlights, waitForIframesReady } from "./aiHelper.js";
 
-const EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
+// 페이지별 예시 질문을 못 받아왔을 때(네트워크 오류 등) 보여줄 기본값
+const DEFAULT_EXAMPLES = ["로그인하려면 어떻게 해?", "여권 발급일 확인해줘"];
 
 const PHASE = {
   IDLE:    'idle',
@@ -29,6 +30,10 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // 다단계 안내(anchors 2개 이상)에서 사용자가 실제 페이지에서 해당 단계 요소를
   // 클릭할 때마다 highlightAnchors의 onStepComplete 콜백으로 채워지는 완료된 단계 인덱스
   const [completedSteps, setCompletedSteps] = useState(new Set());
+  // IDLE 화면 예시 질문: 기본값이 먼저 반짝 보였다가 AI 예시로 바뀌면 어색하므로,
+  // 로딩 중엔 스켈레톤을 보여주고 AI 예시가 도착한 뒤에야 실제 버튼을 표시합니다.
+  const [examples, setExamples] = useState(DEFAULT_EXAMPLES);
+  const [examplesLoading, setExamplesLoading] = useState(true);
   const textareaRef  = useRef(null);
   const lastQuestion = useRef('');
   // stale closure 방지: URL 변경 이벤트 핸들러에서 최신 state를 읽기 위한 refs
@@ -37,6 +42,26 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
   useEffect(() => { phaseRef.current  = phase;  }, [phase]);
   useEffect(() => { resultRef.current = result; }, [result]);
+
+  // 마운트 시 한 번, 현재 페이지에 맞는 예시 질문을 가져옵니다. 실패하면
+  // (네트워크 오류 등) 조용히 기본값으로 폴백하되, 로딩 표시는 항상 끝냅니다.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await waitForIframesReady();
+        const elements = extractElements();
+        const headings = extractHeadings();
+        const generated = await fetchExamples(elements, headings);
+        if (!cancelled && generated) setExamples(generated);
+      } catch {
+        // 기본값 유지
+      } finally {
+        if (!cancelled) setExamplesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const { isSupported: isMicSupported, isListening, toggleListening } =
     useSpeechToText(setValue);
@@ -233,17 +258,30 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
             하고 싶은 작업을 자유롭게 물어보세요.
           </p>
           <div className="gd-examples">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                className="gd-example"
-                onClick={() => setValue(ex)}
-              >
-                <span className="gd-example__label">예시</span>
-                <span className="gd-example__text">&quot;{ex}&quot;</span>
-              </button>
-            ))}
+            {examplesLoading ? (
+              <>
+                <div className="gd-example gd-example--skeleton" aria-hidden="true">
+                  <span className="gd-example__label-skeleton" />
+                  <span className="gd-example__text-skeleton" />
+                </div>
+                <div className="gd-example gd-example--skeleton" aria-hidden="true">
+                  <span className="gd-example__label-skeleton" />
+                  <span className="gd-example__text-skeleton" />
+                </div>
+              </>
+            ) : (
+              examples.map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  className="gd-example"
+                  onClick={() => setValue(ex)}
+                >
+                  <span className="gd-example__label">예시</span>
+                  <span className="gd-example__text">&quot;{ex}&quot;</span>
+                </button>
+              ))
+            )}
           </div>
         </div>
       )}

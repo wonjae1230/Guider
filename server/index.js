@@ -24,7 +24,7 @@ app.use(express.json({ limit: '1mb' }));
 // ─── 모델 설정 ────────────────────────────────────────────────────────────────
 // claude-sonnet-4-6: 정확도와 속도의 균형이 좋은 모델
 // 한국어 의미 이해, 복잡한 UI 판단, 다단계 네비게이션 추론에 haiku보다 우수합니다.
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = 'claude-sonnet-5';
 
 // ─── 시스템 프롬프트 ──────────────────────────────────────────────────────────
 // 모든 요청에서 동일하게 사용되므로 cache_control: ephemeral 지정
@@ -47,9 +47,66 @@ Rules:
 - Elements marked [hidden menu] are currently invisible dropdown/submenu items. If such an element is the destination, put its visible parent menu first in anchors, then the hidden item.
 - Elements marked [hidden menu: click "X" first] require clicking X to reveal them. Put X first in anchors, then the target element.
 - When the user's question and UI labels differ (e.g. "grade" → "성적현황", "my info" → "마이페이지"), choose the semantically closest element.
-- Never recommend using a search function or navigating to an external link.
+- Never recommend using a search function or navigating to an external link. This includes any element whose text/aria-label is a generic search trigger (e.g. "검색", "통합검색"), even if it merely opens a menu layer — pick a non-search navigation element instead (e.g. a hamburger/전체메뉴 button), or if none exists, respond with "notfound".
+- Prefer "navigate" over "notfound" whenever a relevant category/menu clearly exists in the element list, even if it cannot guarantee the exact filtered answer (e.g. a specific neighborhood/date/item). Guiding the user to the closest relevant page is more useful than giving up — mention the uncertainty in "reason", but still provide anchors. Only use "notfound" when no relevant menu or page exists at all.
+- The "reason" field must describe exactly the elements listed in "anchors", in the same order — never mention a different menu or element than what anchors points to.
 - The "reason" field must always be written in Korean.
 - Output JSON only — absolutely no other text.`;
+
+// ─── 응답 JSON 스키마 (Structured Outputs) ──────────────────────────────────────
+// 프롬프트로 "JSON만 출력"을 지시해도 모델이 설명 문장을 앞에 붙이는 경우가 있어,
+// output_config.format으로 응답 형식 자체를 강제합니다.
+const RESPONSE_SCHEMA = {
+  type:       'object',
+  properties: {
+    type: {
+      type: 'string',
+      enum: ['navigate', 'found', 'notfound'],
+    },
+    anchors: {
+      type:  'array',
+      items: {
+        type:       'object',
+        properties: {
+          id:        { type: 'string' },
+          ariaLabel: { type: 'string' },
+          text:      { type: 'string' },
+        },
+        required:             ['id', 'ariaLabel', 'text'],
+        additionalProperties: false,
+      },
+    },
+    reason: { type: 'string' },
+  },
+  required:             ['type', 'anchors', 'reason'],
+  additionalProperties: false,
+};
+
+// ─── IDLE 화면 예시 질문 생성용 프롬프트/스키마 ─────────────────────────────────
+// 위젯을 처음 열었을 때 보여주는 "예시: OOO 어떻게 해?" 문구를, 정적인 문구 대신
+// 현재 페이지의 메뉴/헤딩 구조를 보고 그 사이트에 맞게 생성합니다.
+const EXAMPLES_SYSTEM_PROMPT = `You suggest example questions for an AI page-guide widget, based on the current web page's structure.
+You are given the page's heading structure and a list of interactive DOM elements (menu/nav items, buttons, links).
+Generate exactly 2 short, natural example questions a real visitor of this specific site might ask the guide.
+
+Rules:
+- Base each question on a menu/nav label or heading that actually appears in the provided elements/headings — never invent a feature that isn't there.
+- Prefer common, practical tasks a visitor would realistically want (login, application/registration status, contact info, schedules, fees) over obscure ones.
+- Phrase each question in casual, natural Korean (반말/해요체), matching this style: "로그인하려면 어떻게 해?", "여권 발급일 확인해줘". Keep each under ~20 characters.
+- The two questions must be about clearly different topics/menus of the site, not near-duplicates.
+- Output JSON only — absolutely no other text.`;
+
+const EXAMPLES_SCHEMA = {
+  type:       'object',
+  properties: {
+    examples: {
+      type:  'array',
+      items: { type: 'string' },
+    },
+  },
+  required:             ['examples'],
+  additionalProperties: false,
+};
 
 // ─── 유틸 함수 ────────────────────────────────────────────────────────────────
 
@@ -141,6 +198,18 @@ app.post('/api/query', async (req, res) => {
     const response = await claude.messages.create({
       model:      MODEL,
       max_tokens: 1024,
+      // claude-sonnet-5부터 thinking이 기본 활성화되어, 짧은 max_tokens 예산 안에서
+      // 추론만 하다 실제 답변 text 블록을 못 쓰고 잘리는 문제가 있어 명시적으로 끕니다.
+      // 이 작업은 정해진 JSON 포맷 분류라 thinking이 크게 도움되지 않습니다.
+      thinking: { type: 'disabled' },
+      // 프롬프트로 "JSON만 출력해"라고 지시해도 모델이 가끔 설명 문장을 앞에 붙여
+      // JSON.parse가 깨지는 경우가 있어, 응답 형식 자체를 스키마로 강제합니다.
+      output_config: {
+        format: {
+          type:   'json_schema',
+          schema: RESPONSE_SCHEMA,
+        },
+      },
       system: [
         {
           type:          'text',
@@ -154,8 +223,14 @@ app.post('/api/query', async (req, res) => {
     });
 
     // Claude가 반환한 텍스트를 JSON으로 파싱
+    // claude-sonnet-5부터는 thinking이 기본 활성화되어 content[0]이 text가 아닐 수 있으므로
+    // type이 'text'인 블록을 명시적으로 찾습니다.
     // 모델이 간혹 ```json ... ``` 마크다운 블록으로 감싸는 경우를 제거합니다.
-    const rawText   = response.content[0].text.trim();
+    const textBlock = response.content.find(block => block.type === 'text');
+    if (!textBlock) {
+      throw new Error('Claude 응답에 text 블록이 없습니다.');
+    }
+    const rawText   = textBlock.text.trim();
     const jsonText  = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     console.log('[Claude 응답]', jsonText.slice(0, 200));
     const result    = JSON.parse(jsonText);
@@ -174,6 +249,90 @@ app.post('/api/query', async (req, res) => {
     console.error('[Claude API] 오류:', apiError.message);
     return res.status(500).json({
       error:   'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      message: apiError.message,
+    });
+  }
+});
+
+// ─── /api/examples 엔드포인트 ─────────────────────────────────────────────────
+
+/**
+ * POST /api/examples
+ *
+ * Body: { elements: Array, url: string, headings?: Array }
+ *
+ * 위젯 IDLE 화면에 보여줄 예시 질문 2개를 현재 페이지 구조 기반으로 생성합니다.
+ * pageText는 필요 없음(메뉴/헤딩 구조만으로 충분하고 토큰도 절약됨).
+ * URL 단위로 캐싱하므로, 같은 페이지 재방문 시 API를 다시 호출하지 않습니다.
+ */
+app.post('/api/examples', async (req, res) => {
+  const { elements, url, headings = [] } = req.body;
+
+  if (!elements || !url) {
+    return res.status(400).json({ error: '필수 파라미터(elements, url)가 누락되었습니다.' });
+  }
+
+  const cacheKey = `examples::${url}`;
+
+  try {
+    await connectRedis();
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      console.log(`[캐시 히트] ${cacheKey.slice(0, 80)}...`);
+      return res.json({ ...cached, cached: true });
+    }
+  } catch (cacheError) {
+    console.warn('[캐시] Redis 조회 실패, Claude API로 계속 진행합니다:', cacheError.message);
+  }
+
+  let userMessage = '';
+  if (headings.length > 0) {
+    userMessage += `페이지 구조:\n${headings.join('\n')}\n\n`;
+  }
+  userMessage += `인터랙티브 요소 목록:\n${formatElements(elements)}`;
+
+  try {
+    const response = await claude.messages.create({
+      model:      MODEL,
+      max_tokens: 512,
+      thinking:   { type: 'disabled' },
+      output_config: {
+        format: {
+          type:   'json_schema',
+          schema: EXAMPLES_SCHEMA,
+        },
+      },
+      system: [
+        {
+          type:          'text',
+          text:          EXAMPLES_SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      messages: [
+        { role: 'user', content: userMessage },
+      ],
+    });
+
+    const textBlock = response.content.find(block => block.type === 'text');
+    if (!textBlock) {
+      throw new Error('Claude 응답에 text 블록이 없습니다.');
+    }
+    const result = JSON.parse(textBlock.text.trim());
+    result.examples = (result.examples || []).slice(0, 2);
+
+    try {
+      await setCache(cacheKey, result);
+    } catch (cacheError) {
+      console.warn('[캐시] Redis 저장 실패:', cacheError.message);
+    }
+
+    return res.json(result);
+
+  } catch (apiError) {
+    console.error('[Claude API] 예시 질문 생성 오류:', apiError.message);
+    return res.status(500).json({
+      error:   '예시 질문 생성에 실패했습니다.',
       message: apiError.message,
     });
   }

@@ -247,6 +247,37 @@ img {
   color: #2c2636;
 }
 
+/* 예시 질문 로딩 스켈레톤: 기본값이 반짝 보였다가 AI 예시로 바뀌는 걸
+   피하려고, 로딩 중엔 실제 텍스트 대신 이 펄스 애니메이션을 보여줍니다. */
+.gd-example--skeleton {
+  cursor: default;
+}
+
+.gd-example__label-skeleton,
+.gd-example__text-skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #f3eef6 25%, #ece1f0 37%, #f3eef6 63%);
+  background-size: 400% 100%;
+  animation: gd-skeleton-pulse 1.4s ease infinite;
+}
+
+.gd-example__label-skeleton {
+  width: 28px;
+  height: 11px;
+}
+
+.gd-example__text-skeleton {
+  width: 70%;
+  height: 15px;
+  margin-top: 2px;
+}
+
+@keyframes gd-skeleton-pulse {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0%   50%; }
+}
+
 /* Footer */
 .gd-footer {
   padding: 16px 20px 18px;
