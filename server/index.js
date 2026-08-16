@@ -36,10 +36,15 @@ Respond ONLY with the following JSON format — no other text.
 Response format:
 {"type":"navigate","anchors":[{"id":"element-id","ariaLabel":"aria-label value","text":"element text"}],"reason":"Korean guidance message"}
 
+For ambiguous questions:
+{"type":"clarify","anchors":[],"reason":"Korean clarification question","options":["Korean option 1","Korean option 2"]}
+
 Type rules:
 - "navigate": Found UI elements the user needs to click or navigate to. Include them in anchors.
 - "found": The answer can be read directly from page text (e.g. email, grade, name). Set anchors to []. Put the answer directly in reason.
 - "notfound": The feature or information cannot be found. Set anchors to []. Explain why in reason.
+- "clarify": The question has two or more plausible meanings. Set anchors to [] and provide 2 to 4 short Korean options.
+
 
 Rules:
 - anchors must only contain elements that exist in the provided DOM element list
@@ -51,6 +56,10 @@ Rules:
 - Prefer "navigate" over "notfound" whenever a relevant category/menu clearly exists in the element list, even if it cannot guarantee the exact filtered answer (e.g. a specific neighborhood/date/item). Guiding the user to the closest relevant page is more useful than giving up — mention the uncertainty in "reason", but still provide anchors. Only use "notfound" when no relevant menu or page exists at all.
 - The "reason" field must describe exactly the elements listed in "anchors", in the same order — never mention a different menu or element than what anchors points to.
 - The "reason" field must always be written in Korean.
+- Do not guess when the user's question is ambiguous.
+- For "clarify", provide 2 to 4 short and distinct Korean options.
+- For responses other than "clarify", set options to [].
+- If this is a follow-up answer to a clarification, do not return "clarify" again.
 - Output JSON only — absolutely no other text.`;
 
 // ─── 응답 JSON 스키마 (Structured Outputs) ──────────────────────────────────────
@@ -61,7 +70,7 @@ const RESPONSE_SCHEMA = {
   properties: {
     type: {
       type: 'string',
-      enum: ['navigate', 'found', 'notfound'],
+      enum: ['navigate', 'found', 'notfound', 'clarify'],
     },
     anchors: {
       type:  'array',
@@ -77,8 +86,12 @@ const RESPONSE_SCHEMA = {
       },
     },
     reason: { type: 'string' },
+    options: {
+      type: 'array',
+      items: { type: 'string' },
+    }
   },
-  required:             ['type', 'anchors', 'reason'],
+  required:             ['type', 'anchors', 'reason', 'options'],
   additionalProperties: false,
 };
 
@@ -150,7 +163,7 @@ function formatElements(elements) {
  *  5. 결과 반환
  */
 app.post('/api/query', async (req, res) => {
-  const { question, elements, url, pageText = '', headings = [] } = req.body;
+  const { question, elements, url, pageText = '', headings = [], isFollowUp = false } = req.body;
 
   // 필수 파라미터 누락 검사
   if (!question || !elements || !url) {
@@ -181,6 +194,9 @@ app.post('/api/query', async (req, res) => {
   if (gradeEl.length) console.log('[성적 관련 요소]', gradeEl.map(e => e.text));
 
   let userMessage = `사용자 질문: ${question}\n\n`;
+  if (isFollowUp) {
+  userMessage += `이 질문은 모호성 확인에 대한 사용자의 후속 답변입니다. 다시 되묻지 말고 navigate, found 또는 notfound로 최종 답변하세요.\n\n`;
+  }
 
   // 페이지 헤딩 구조: AI가 페이지 섹션을 이해해 "학점 → 성적현황" 같은 의미 매핑을 잘 하도록 돕습니다.
   if (headings.length > 0) {
