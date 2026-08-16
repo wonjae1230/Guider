@@ -89,7 +89,6 @@ const RESPONSE_SCHEMA = {
     options: {
       type: 'array',
       items: { type: 'string' },
-      maxItems: 4, 
     }
   },
   required:             ['type', 'anchors', 'reason', 'options'],
