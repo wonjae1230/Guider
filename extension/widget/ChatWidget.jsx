@@ -24,7 +24,9 @@ const TAB_STATE_KEY = 'guiderTabState';
 
 // 대화 한 턴(질문 + AI 답변)을 그린다. 진행 중인 턴과, 페이지 이동으로 아래에 쌓인
 // 지난 턴(isHistory) 모두 이 컴포넌트로 그려서 완료 배너를 포함해 그대로 이어 보입니다.
-function ChatTurn({ question, result, completedSteps, isHistory = false }) {
+// onOptionClick은 type: 'clarify'일 때 선택지 버튼 클릭을 처리합니다(진행 중인 턴에서만 씀 —
+// 지난 턴은 이미 다음 질문으로 넘어갔으므로 선택지를 다시 누를 수 없게 표시만 합니다).
+function ChatTurn({ question, result, completedSteps, isHistory = false, onOptionClick }) {
   const anchors     = result?.anchors ?? [];
   const hasAnchors  = anchors.length > 0;
   // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
@@ -37,8 +39,27 @@ function ChatTurn({ question, result, completedSteps, isHistory = false }) {
     <div className={`gd-turn${isHistory ? ' gd-turn--history' : ''}`}>
       {question && <p className="gd-turn__question">&quot;{question}&quot;</p>}
 
-      {/* type: found → 페이지에서 정보를 직접 찾은 경우 (이메일, 학점 등) */}
-      {resultType === 'found' ? (
+      {/* type: clarify → 질문이 모호해 되물어야 하는 경우 (선택지 2~4개) */}
+      {resultType === 'clarify' ? (
+        <>
+          <p className="gd-result-reason">{result.reason}</p>
+          {!isHistory && Array.isArray(result.options) && result.options.length > 0 && (
+            <div className="gd-examples">
+              {result.options.map((option, i) => (
+                <button
+                  key={`${option}-${i}`}
+                  type="button"
+                  className="gd-example"
+                  onClick={() => onOptionClick?.(option)}
+                >
+                  <span className="gd-example__text">{option}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      ) : /* type: found → 페이지에서 정보를 직접 찾은 경우 (이메일, 학점 등) */
+      resultType === 'found' ? (
         <div className="gd-info-box">
           <div className="gd-info-box__label">✓ 찾았어요!</div>
           <p className="gd-info-box__text">{result.reason}</p>
@@ -183,7 +204,8 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   // "모든 단계를 완료했어요!"까지 본 뒤 마지막 클릭이 로그인 페이지 등 관련 없는
   // 곳으로 이어지면, 자동 재질문이 "못 찾았어요"를 새로 띄워 방금 본 완료 화면을
   // 덮어써버리는 문제가 있어 이 경우만 결과를 무시하고 완료 화면을 유지합니다.
-  const triggerQuery = useCallback(async (question, { auto = false } = {}) => {
+  // isFollowUp: true면 모호한 질문(clarify)에 대한 사용자의 후속 답변입니다.
+  const triggerQuery = useCallback(async (question, { auto = false, isFollowUp = false } = {}) => {
     // 직전 턴에 결과가 남아있다면(체크리스트, 완료 배너 포함) 지우지 않고
     // 히스토리로 옮겨서 새 턴 아래에 계속 보이도록 합니다.
     let archivedTurn = null;
@@ -214,7 +236,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       const elements = extractElements();
       const pageText = extractPageText();
       const headings = extractHeadings();
-      const aiResult = await callAI(question, elements, pageText, headings);
+      const aiResult = await callAI(question, elements, pageText, headings, isFollowUp);
       // type 필드가 없는 캐시된 구버전 응답은 'navigate'로 간주합니다 (하위 호환).
       const effectiveType = aiResult.type ?? 'navigate';
 
@@ -368,11 +390,29 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
   }, [triggerQuery]);
 
   // ── 입력 처리 ──────────────────────────────────────────────────────────────
+  // 모호한 질문(type: clarify)에 대한 사용자의 후속 답변을 원래 질문에 이어붙여 재실행합니다.
+  const askClarifyFollowUp = useCallback(async (answer) => {
+    const combined = `${lastQuestion.current}\n(추가 설명: ${answer})`;
+    lastQuestion.current = combined;
+    await triggerQuery(combined, { isFollowUp: true });
+  }, [triggerQuery]);
+
   const handleSend = async () => {
-    const question = value.trim();
-    if (!question || phase === PHASE.LOADING) return;
-    lastQuestion.current = question;
-    await triggerQuery(question);
+    const input = value.trim();
+    if (!input || phase === PHASE.LOADING) return;
+
+    if (phase === PHASE.RESULT && resultType === 'clarify') {
+      await askClarifyFollowUp(input);
+      return;
+    }
+
+    lastQuestion.current = input;
+    await triggerQuery(input);
+  };
+
+  const handleOptionClick = async (option) => {
+    if (phase === PHASE.LOADING) return;
+    await askClarifyFollowUp(option);
   };
 
   const handleKeyDown = (e) => {
@@ -399,6 +439,10 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
     completedStepsRef.current = new Set();
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
+
+  // handleSend가 지금 clarify 후속 답변을 받는 중인지 판단하는 데 씁니다.
+  // 이전 응답(type 필드 없음)과의 하위 호환: 기본값 'navigate'
+  const resultType = result?.type ?? 'navigate';
 
   // 안내 대상 요소가 카드 뒤에 가려질 때: 대화 상태는 그대로 유지한 채
   // 작은 아이콘으로 접어서 실제 페이지 요소를 클릭할 수 있게 비켜줍니다.
@@ -498,7 +542,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
             <ChatTurn key={i} question={turn.question} result={turn.result} completedSteps={turn.completedSteps} isHistory />
           ))}
 
-          <ChatTurn question={resultQuestionRef.current} result={result} completedSteps={Array.from(completedSteps)} />
+          <ChatTurn question={resultQuestionRef.current} result={result} completedSteps={Array.from(completedSteps)} onOptionClick={handleOptionClick} />
 
           <button type="button" className="gd-reset-btn" onClick={handleReset}>
             다시 질문하기
@@ -528,7 +572,11 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
             ref={textareaRef}
             className="gd-input"
             rows={1}
-            placeholder="어떤 것을 찾고 계신가요?"
+            placeholder={
+              phase === PHASE.RESULT && resultType === 'clarify'
+              ? '답변을 입력해 주세요...'
+              : '어떤 것을 찾고 계신가요?'
+            }
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
