@@ -290,6 +290,10 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
               {/* 모든 단계를 실제로 클릭 완료했을 때 크게 보여주는 완료 배너 */}
               {allStepsDone && (
                 <div className="gd-complete-banner">
+                  <span className="gd-complete-banner__confetti" aria-hidden="true">
+                    <span></span><span></span><span></span>
+                    <span></span><span></span><span></span>
+                  </span>
                   <span className="gd-complete-banner__icon">✓</span>
                   <span className="gd-complete-banner__text">모든 단계를 완료했어요!</span>
                 </div>
