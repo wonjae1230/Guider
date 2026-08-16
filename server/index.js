@@ -36,10 +36,14 @@ Respond ONLY with the following JSON format — no other text.
 Response format:
 {"type":"navigate","anchors":[{"id":"element-id","ariaLabel":"aria-label value","text":"element text"}],"reason":"Korean guidance message"}
 
+For ambiguous questions:
+{"type":"clarify","anchors":[],"choices":[{"id":"choice-id","label":"Korean choice label"}],"reason":"Korean clarification question"}
+
 Type rules:
 - "navigate": Found UI elements the user needs to click or navigate to. Include them in anchors.
 - "found": The answer can be read directly from page text (e.g. email, grade, name). Set anchors to []. Put the answer directly in reason.
 - "notfound": The feature or information cannot be found. Set anchors to []. Explain why in reason.
+- "clarify": The question has two or more plausible meanings or target elements. Set anchors to [] and provide 2 to 4 choices.
 
 Rules:
 - anchors must only contain elements that exist in the provided DOM element list
@@ -49,7 +53,11 @@ Rules:
 - When the user's question and UI labels differ (e.g. "grade" → "성적현황", "my info" → "마이페이지"), choose the semantically closest element.
 - Never recommend using a search function or navigating to an external link.
 - The "reason" field must always be written in Korean.
+- Do not guess when the user's question is ambiguous.
+- For "clarify", provide 2 to 4 short choices with unique ids and Korean labels.
+- If the user has already selected a choice, follow that choice instead of asking the same clarification again.
 - Output JSON only — absolutely no other text.`;
+
 
 // ─── 유틸 함수 ────────────────────────────────────────────────────────────────
 
@@ -93,7 +101,13 @@ function formatElements(elements) {
  *  5. 결과 반환
  */
 app.post('/api/query', async (req, res) => {
-  const { question, elements, url, pageText = '', headings = [] } = req.body;
+  const { 
+    question, 
+    elements, url, 
+    pageText = '', 
+    headings = [],
+    selectedChoice = null,
+   } = req.body;
 
   // 필수 파라미터 누락 검사
   if (!question || !elements || !url) {
@@ -102,7 +116,10 @@ app.post('/api/query', async (req, res) => {
 
   // 캐시 키: URL + 질문 조합
   // 페이지가 바뀌면 URL이 달라지므로 캐시가 자동으로 무효화됩니다.
-  const cacheKey = `${url}::${question}`;
+  const selectedChoiceKey =
+  selectedChoice?.id || selectedChoice?.label || '';
+
+  const cacheKey = `${url}::${question}::${selectedChoiceKey}`;
 
   // ── 1단계: Redis 캐시 조회 ──────────────────────────────────────────────────
   try {
@@ -123,8 +140,10 @@ app.post('/api/query', async (req, res) => {
   const gradeEl = elements.filter(el => el.text?.includes('성적') || el.text?.includes('grade'));
   if (gradeEl.length) console.log('[성적 관련 요소]', gradeEl.map(e => e.text));
 
-  let userMessage = `사용자 질문: ${question}\n\n`;
-
+  if (selectedChoice?.label) {
+    userMessage += `사용자가 선택한 구체적인 의도: ${selectedChoice.label}\n\n`;
+  }
+  
   // 페이지 헤딩 구조: AI가 페이지 섹션을 이해해 "학점 → 성적현황" 같은 의미 매핑을 잘 하도록 돕습니다.
   if (headings.length > 0) {
     userMessage += `페이지 구조:\n${headings.join('\n')}\n\n`;
