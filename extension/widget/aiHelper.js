@@ -9,8 +9,56 @@ const BACKEND_URL    = 'http://localhost:3000';
 const HIGHLIGHT_CLASS = 'guider-hl';
 const TOOLTIP_CLASS   = 'guider-tt';
 
-// 하이라이트 색상: 위젯 브랜드 컬러(보라)와 통일
-const HL_COLOR = '#7b2ff7';
+// 하이라이트 색상: 사이트마다 배경색이 다르므로(흰 배경 vs 다크 테마 등),
+// 고정된 보라색 하나만 쓰면 일부 사이트에서 잘 안 보일 수 있습니다.
+// 강조할 요소 주변의 실제 배경색을 읽어서, 그 배경과 대비가 강한 색을 고릅니다.
+const HL_COLOR             = '#7b2ff7'; // 기본값(계산 실패 시 폴백) — 위젯 브랜드 보라
+const HL_COLOR_ON_LIGHT_BG = '#7b2ff7'; // 밝은 배경용
+const HL_COLOR_ON_DARK_BG  = '#ffd60a'; // 어두운 배경용 — 다크 테마에서도 잘 보이는 밝은 골드
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function parseRgbString(str) {
+  const m = str?.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/);
+  if (!m) return null;
+  const alpha = m[4] === undefined ? 1 : Number(m[4]);
+  if (alpha === 0) return null; // 완전 투명은 배경으로 안 침
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+// el부터 조상 체인을 올라가며 처음 만나는 불투명 배경색을 찾습니다.
+// 못 찾으면(전부 transparent) 흰 배경으로 가정합니다(웹페이지 기본값).
+function getEffectiveBackground(el, win = window) {
+  let node = el;
+  while (node) {
+    try {
+      const rgb = parseRgbString(win.getComputedStyle(node).backgroundColor);
+      if (rgb) return rgb;
+    } catch {
+      break;
+    }
+    node = node.parentElement;
+  }
+  return [255, 255, 255];
+}
+
+// WCAG 상대 휘도(0=검정 ~ 1=흰색)
+function relativeLuminance([r, g, b]) {
+  const [R, G, B] = [r, g, b].map((c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+
+// el 주변의 실제 배경 밝기에 따라 대비가 강한 하이라이트 색을 고릅니다.
+function pickHighlightColor(el, win = window) {
+  const bg = getEffectiveBackground(el, win);
+  return relativeLuminance(bg) < 0.4 ? HL_COLOR_ON_DARK_BG : HL_COLOR_ON_LIGHT_BG;
+}
 
 // ─── 민감정보 마스킹 ──────────────────────────────────────────────────────────
 
@@ -122,7 +170,7 @@ const INTERACTIVE_SELECTOR = [
 ].join(', ');
 
 // 단일 document에서 인터랙티브 요소를 최대 limit개 추출합니다.
-function extractFromDoc(doc, win, limit = 100) {
+function extractFromDoc(doc, win, limit = 400) {
   const nodes    = doc.querySelectorAll(INTERACTIVE_SELECTOR);
   const elements = [];
 
@@ -262,13 +310,18 @@ function collectFrameDocs(doc, win, depth = 0, path = 'top', chain = [], acc = [
  * extractElements/extractPageText 호출 전에 waitForIframesReady()로
  * iframe 로딩을 기다려야 콘텐츠가 채워진 상태를 읽을 수 있습니다.
  */
+// 세종시청처럼 상단 네비 + "전체메뉴" 모달까지 합치면 인터랙티브 요소가
+// 100개를 훌쩍 넘는 대형 포털 사이트가 있어, 뒤쪽에 있는 메뉴 항목이
+// 잘려서 AI에게 전달조차 안 되는 문제가 있었습니다. 400으로 상향합니다.
+const MAX_ELEMENTS = 400;
+
 export function extractElements() {
   const frames = collectFrameDocs(document, window);
   const elements = [];
 
   for (const { doc, win, path } of frames) {
-    if (elements.length >= 100) break;
-    const found = extractFromDoc(doc, win, 100 - elements.length);
+    if (elements.length >= MAX_ELEMENTS) break;
+    const found = extractFromDoc(doc, win, MAX_ELEMENTS - elements.length);
     if (found.length > 0) {
       console.log(`[Guider] 요소 추출 (${path}):`, found.length, '개');
     }
@@ -365,6 +418,37 @@ export async function callAI(question, elements, pageText = '', headings = []) {
   }
 }
 
+/**
+ * 위젯 IDLE 화면에 보여줄 예시 질문 2개를 현재 페이지 구조 기반으로 받아옵니다.
+ * 실패해도(네트워크 오류, 타임아웃 등) 위젯 초기 화면이 깨지면 안 되므로,
+ * 호출하는 쪽(ChatWidget)에서 실패 시 기본 예시로 조용히 폴백합니다.
+ */
+export async function fetchExamples(elements, headings = []) {
+  const controller = new AbortController();
+  const timer      = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/examples`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        elements,
+        headings,
+        url: window.location.href,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+    const body = await response.json();
+    return Array.isArray(body.examples) && body.examples.length > 0 ? body.examples : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── 하이라이트 ───────────────────────────────────────────────────────────────
 // extractElements와 마찬가지로 anchor가 top이 아니라 중첩된 frame/iframe 안의
 // 요소를 가리킬 수 있으므로, 하이라이트도 collectFrameDocs로 모든 프레임을 뒤집니다.
@@ -378,14 +462,14 @@ function ensureHighlightStyles(doc) {
   style.id    = 'guider-hl-styles';
   style.textContent = `
     .${HIGHLIGHT_CLASS} {
-      outline: 2px solid ${HL_COLOR} !important;
+      outline: 2px solid var(--guider-hl-color, ${HL_COLOR}) !important;
       outline-offset: 2px            !important;
-      background-color: rgba(123, 47, 247, 0.1) !important;
+      background-color: var(--guider-hl-bg-color, rgba(123, 47, 247, 0.1)) !important;
       transition: outline 0.15s ease !important;
     }
     .${TOOLTIP_CLASS} {
       position:      fixed;
-      background:    ${HL_COLOR};
+      background:    var(--guider-hl-color, ${HL_COLOR});
       color:         #fff;
       padding:       4px 10px;
       border-radius: 6px;
@@ -402,7 +486,7 @@ function ensureHighlightStyles(doc) {
       width:           20px;
       height:          20px;
       border-radius:   50%;
-      background:      ${HL_COLOR};
+      background:      var(--guider-hl-color, ${HL_COLOR});
       color:            #fff;
       font-size:        12px;
       font-weight:      700;
@@ -419,7 +503,7 @@ function ensureHighlightStyles(doc) {
   doc.head.appendChild(style);
 }
 
-function findElementInDoc(doc, anchor) {
+function findElementInDoc(doc, anchor, win = window) {
   if (anchor.id) {
     const el = doc.getElementById(anchor.id);
     if (el) return el;
@@ -432,15 +516,30 @@ function findElementInDoc(doc, anchor) {
     const candidates = doc.querySelectorAll(
       'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]',
     );
+    // PC/모바일 중복 마크업 등으로 같은 텍스트를 가진 요소가 여러 개 있을 수 있어,
+    // "지금 실제로 보이는" 요소를 우선 채택합니다. 완전히 안 보이는 요소만 있으면
+    // (숨긴 조상을 revealStep에서 강제로 펼치는 시나리오를 위해) 폴백으로 반환합니다.
+    let exactHidden   = null;
+    let partialHidden = null;
+
     // 1. 표준 인터랙티브 요소 — 정확히 일치
     for (const el of candidates) {
-      if ((el.innerText || el.value || '').trim() === anchor.text) return el;
+      if ((el.innerText || el.value || '').trim() === anchor.text) {
+        if (isVisible(el, win)) return el;
+        if (!exactHidden) exactHidden = el;
+      }
     }
     // 2. 표준 인터랙티브 요소 — 부분 포함
     for (const el of candidates) {
       const t = (el.innerText || el.value || '').trim();
-      if (t && anchor.text.includes(t)) return el;
+      if (t && anchor.text.includes(t)) {
+        if (isVisible(el, win)) return el;
+        if (!partialHidden) partialHidden = el;
+      }
     }
+    if (exactHidden)   return exactHidden;
+    if (partialHidden) return partialHidden;
+
     // 3. 비표준 클릭 요소(div/li 아코디언 트리거 등) — 직접 텍스트만 가진 leaf 요소로 제한
     const broad = doc.querySelectorAll('div, li, span, dt, th, td');
     for (const el of broad) {
@@ -458,8 +557,8 @@ function findElementInDoc(doc, anchor) {
  * iframe/frame 요소 목록으로, 화면 좌표 변환에 사용됩니다.
  */
 function findElement(anchor) {
-  for (const { doc, chain } of collectFrameDocs(document, window)) {
-    const el = findElementInDoc(doc, anchor);
+  for (const { doc, win, chain } of collectFrameDocs(document, window)) {
+    const el = findElementInDoc(doc, anchor, win);
     if (el) return { el, doc, chain };
   }
   return null;
@@ -494,8 +593,17 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
 
   const localRect = el.getBoundingClientRect();
   if (localRect.width === 0 && localRect.height === 0) {
+    el.classList.remove(HIGHLIGHT_CLASS);
     return null; // 아직 숨겨져 있어 위치를 계산할 수 없음
   }
+
+  // 요소 주변 실제 배경색과 대비되는 색을 골라 el/tooltip/badge에 전부 적용합니다.
+  const win      = doc.defaultView || window;
+  const hlColor  = pickHighlightColor(el, win);
+  const [r, g, b] = hexToRgb(hlColor);
+  const hlBgColor = `rgba(${r}, ${g}, ${b}, 0.1)`;
+  el.style.setProperty('--guider-hl-color', hlColor);
+  el.style.setProperty('--guider-hl-bg-color', hlBgColor);
 
   const rect = getAbsoluteRect(el, chain);
   // 사이드바처럼 화면 가장자리에 붙은 요소는 배지를 -10px 띄우면 화면 밖으로 잘리므로 클램프
@@ -507,6 +615,7 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
   tooltip.textContent = multiStep ? `Step ${i + 1}` : '여기를 찾아보세요';
   tooltip.style.top   = rect.top > 40 ? `${rect.top - 32}px` : `${rect.bottom + 6}px`;
   tooltip.style.left  = `${Math.max(4, rect.left)}px`;
+  tooltip.style.setProperty('--guider-hl-color', hlColor);
   document.body.appendChild(tooltip);
 
   let badge = null;
@@ -516,6 +625,7 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
     badge.textContent = String(i + 1);
     badge.style.top   = `${clampedTop}px`;
     badge.style.left  = `${clampedLeft}px`;
+    badge.style.setProperty('--guider-hl-color', hlColor);
     document.body.appendChild(badge);
   }
 
@@ -525,6 +635,8 @@ function drawStepMarkers(el, doc, chain, i, multiStep) {
 function removeStepMarkers(marker) {
   if (!marker) return;
   marker.el.classList.remove(HIGHLIGHT_CLASS);
+  marker.el.style.removeProperty('--guider-hl-color');
+  marker.el.style.removeProperty('--guider-hl-bg-color');
   marker.tooltip?.remove();
   marker.badge?.remove();
 }
@@ -560,27 +672,62 @@ export function highlightAnchors(anchors, onStepComplete) {
     const { el, doc, chain } = found;
     const marker = drawStepMarkers(el, doc, chain, i, multiStep);
 
+    // 강제로 메뉴를 열어버리지 않습니다 — Guider는 "어디를 클릭/호버해야 하는지"만
+    // 알려주고, 실제 상호작용은 사용자가 직접 하도록 둡니다. 지금 안 보이면
+    // 사용자가 이전 단계를 실제로 클릭/호버해서 펼치길 기다렸다가 재탐색합니다.
     if (!marker) {
       if (retriesLeft <= 0) {
         console.log('[Guider] 요소가 계속 숨겨져 있어 재탐색 포기:', anchors[i]);
         return;
       }
       console.log('[Guider] 요소가 아직 숨겨져 있어 배지/툴팁 생략(펼치면 자동 재탐색):', anchors[i]);
-      // 지금은 안 보이지만, 클릭으로 펼쳐질 수 있으니 잠시 후 한 번 더 시도합니다.
+      // 지금은 안 보이지만, 클릭/호버로 펼쳐질 수 있으니 잠시 후 한 번 더 시도합니다.
       setTimeout(() => revealStep(i, retriesLeft - 1), 600);
       return;
     }
 
     if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // 단계가 1개뿐이어도(anchors.length === 1) 클릭하면 완료 처리는 동일하게 합니다.
-    // 배지/"Step N" 텍스트만 multiStep일 때 표시할 뿐, 완료 체크는 항상 필요합니다.
-    marker.el.addEventListener('click', function onStepClick() {
+    // 마지막 단계는 "펼치는 용도"가 아니라 사용자가 실제로 이동/실행해야 하는
+    // 최종 목적지이므로, 지나가다 마우스가 스치기만 해도 완료되면 안 됩니다 —
+    // 반드시 클릭해야 완료됩니다.
+    const isFinalStep = i === anchors.length - 1;
+    let advanced = false;
+
+    function completeStep() {
+      if (advanced) return;
+      advanced = true;
+      marker.el.removeEventListener('click', onClick);
+      marker.el.removeEventListener('mouseenter', onMouseEnter);
       removeStepMarkers(marker);
       onStepComplete?.(i);
-      // 클릭으로 아코디언이 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
+      // 상호작용으로 메뉴가 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
       setTimeout(() => revealStep(i + 1), 300);
-    }, { once: true });
+    }
+
+    // 클릭은 사용자의 명확한 의도이므로 항상 즉시 완료 처리합니다.
+    function onClick() {
+      completeStep();
+    }
+
+    // 호버는 애매합니다 — 클래스넷 좌측 메뉴처럼 클릭해야만 펼쳐지는 아코디언은
+    // 마우스만 올려서는 실제로 아무 것도 안 열립니다. 그래서 호버 시 곧바로
+    // 완료 처리하지 않고, 잠깐 기다렸다가 "정말로 다음 단계 요소가 화면에
+    // 나타났는지" 확인한 뒤에만(=진짜 :hover 메뉴였을 때만) 완료 처리합니다.
+    function onMouseEnter() {
+      if (advanced) return;
+      setTimeout(() => {
+        if (advanced) return;
+        const next = findElement(anchors[i + 1]);
+        const rect = next?.el.getBoundingClientRect();
+        if (rect && (rect.width > 0 || rect.height > 0)) {
+          completeStep();
+        }
+      }, 400); // CSS :hover 전환/애니메이션 시간을 감안한 지연
+    }
+
+    marker.el.addEventListener('click', onClick);
+    if (!isFinalStep) marker.el.addEventListener('mouseenter', onMouseEnter);
   }
 
   revealStep(0);
