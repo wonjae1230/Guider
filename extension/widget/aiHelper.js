@@ -716,23 +716,46 @@ export function highlightAnchors(anchors, onStepComplete) {
 
     if (i === 0) marker.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // 단계가 1개뿐이어도(anchors.length === 1) 완료 처리는 동일하게 합니다.
-    // 배지/"Step N" 텍스트만 multiStep일 때 표시할 뿐, 완료 체크는 항상 필요합니다.
-    // 클릭형 메뉴뿐 아니라 :hover로만 펼쳐지는 메뉴도 있어, click과 mouseenter
-    // 둘 다 "사용자가 실제로 상호작용했다"는 신호로 받아들여 다음 단계로 넘어갑니다.
+    // 마지막 단계는 "펼치는 용도"가 아니라 사용자가 실제로 이동/실행해야 하는
+    // 최종 목적지이므로, 지나가다 마우스가 스치기만 해도 완료되면 안 됩니다 —
+    // 반드시 클릭해야 완료됩니다.
+    const isFinalStep = i === anchors.length - 1;
     let advanced = false;
-    function onStepAdvance() {
+
+    function completeStep() {
       if (advanced) return;
       advanced = true;
-      marker.el.removeEventListener('click', onStepAdvance);
-      marker.el.removeEventListener('mouseenter', onStepAdvance);
+      marker.el.removeEventListener('click', onClick);
+      marker.el.removeEventListener('mouseenter', onMouseEnter);
       removeStepMarkers(marker);
       onStepComplete?.(i);
       // 상호작용으로 메뉴가 펼쳐지는 등 DOM이 바뀔 시간을 준 뒤 다음 단계를 다시 찾습니다.
       setTimeout(() => revealStep(i + 1), 300);
     }
-    marker.el.addEventListener('click', onStepAdvance);
-    marker.el.addEventListener('mouseenter', onStepAdvance);
+
+    // 클릭은 사용자의 명확한 의도이므로 항상 즉시 완료 처리합니다.
+    function onClick() {
+      completeStep();
+    }
+
+    // 호버는 애매합니다 — 클래스넷 좌측 메뉴처럼 클릭해야만 펼쳐지는 아코디언은
+    // 마우스만 올려서는 실제로 아무 것도 안 열립니다. 그래서 호버 시 곧바로
+    // 완료 처리하지 않고, 잠깐 기다렸다가 "정말로 다음 단계 요소가 화면에
+    // 나타났는지" 확인한 뒤에만(=진짜 :hover 메뉴였을 때만) 완료 처리합니다.
+    function onMouseEnter() {
+      if (advanced) return;
+      setTimeout(() => {
+        if (advanced) return;
+        const next = findElement(anchors[i + 1]);
+        const rect = next?.el.getBoundingClientRect();
+        if (rect && (rect.width > 0 || rect.height > 0)) {
+          completeStep();
+        }
+      }, 400); // CSS :hover 전환/애니메이션 시간을 감안한 지연
+    }
+
+    marker.el.addEventListener('click', onClick);
+    if (!isFinalStep) marker.el.addEventListener('mouseenter', onMouseEnter);
   }
 
   revealStep(0);
