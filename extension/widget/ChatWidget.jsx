@@ -179,17 +179,27 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
   // ── 공통 질문 처리 ─────────────────────────────────────────────────────────
   // handleSend와 자동 재실행 양쪽에서 호출되므로 분리합니다.
-  const triggerQuery = useCallback(async (question) => {
+  // auto: true면 사용자가 직접 물은 게 아니라 페이지 이동으로 자동 재실행된 것입니다.
+  // "모든 단계를 완료했어요!"까지 본 뒤 마지막 클릭이 로그인 페이지 등 관련 없는
+  // 곳으로 이어지면, 자동 재질문이 "못 찾았어요"를 새로 띄워 방금 본 완료 화면을
+  // 덮어써버리는 문제가 있어 이 경우만 결과를 무시하고 완료 화면을 유지합니다.
+  const triggerQuery = useCallback(async (question, { auto = false } = {}) => {
     // 직전 턴에 결과가 남아있다면(체크리스트, 완료 배너 포함) 지우지 않고
     // 히스토리로 옮겨서 새 턴 아래에 계속 보이도록 합니다.
+    let archivedTurn = null;
     if (resultRef.current) {
-      historyRef.current = [...historyRef.current, {
+      archivedTurn = {
         question:       resultQuestionRef.current,
         result:         resultRef.current,
         completedSteps: Array.from(completedStepsRef.current),
-      }];
+      };
+      historyRef.current = [...historyRef.current, archivedTurn];
       setTurnHistory(historyRef.current);
     }
+
+    const prevAnchors   = archivedTurn?.result.anchors ?? [];
+    const prevFullyDone = auto && prevAnchors.length > 0 &&
+      archivedTurn.completedSteps.length >= prevAnchors.length;
 
     setValue("");
     setPhase(PHASE.LOADING);
@@ -205,6 +215,21 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
       const pageText = extractPageText();
       const headings = extractHeadings();
       const aiResult = await callAI(question, elements, pageText, headings);
+      // type 필드가 없는 캐시된 구버전 응답은 'navigate'로 간주합니다 (하위 호환).
+      const effectiveType = aiResult.type ?? 'navigate';
+
+      if (prevFullyDone && effectiveType === 'notfound') {
+        // 이미 다 완료된 안내를 자동으로 이어가다 관련 없는 페이지에 도착한 경우:
+        // 방금 archiving한 턴을 되돌려 완료 화면을 그대로 유지합니다.
+        historyRef.current = historyRef.current.slice(0, -1);
+        setTurnHistory(historyRef.current);
+        setResult(archivedTurn.result);
+        setPhase(PHASE.RESULT);
+        resultQuestionRef.current = archivedTurn.question;
+        setCompletedSteps(new Set(archivedTurn.completedSteps));
+        try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+        return;
+      }
 
       setResult(aiResult);
       setPhase(PHASE.RESULT);
@@ -218,8 +243,6 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
 
       // navigate 타입이면 다음 페이지 이동 후 자동 재실행할 수 있도록 저장
       // sessionStorage는 같은 탭 내 MPA 이동에도 유지되어 chrome.storage.session보다 신뢰성이 높습니다.
-      // type 필드가 없는 캐시된 구버전 응답은 'navigate'로 간주합니다 (하위 호환).
-      const effectiveType = aiResult.type ?? 'navigate';
       if (effectiveType === 'navigate' && aiResult.anchors?.length > 0) {
         try {
           sessionStorage.setItem(SESSION_KEY, JSON.stringify({ question, fromUrl: location.href }));
@@ -307,7 +330,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
           } catch {}
 
           lastQuestion.current = pending.question;
-          triggerQuery(pending.question);
+          triggerQuery(pending.question, { auto: true });
         }
       }
     } catch {}
@@ -321,7 +344,7 @@ function ChatWidget({ siteName, dragHandleProps, onClose }) {
         lastQuestion.current
       ) {
         // DOM이 새 페이지로 업데이트될 시간을 확보한 후 재실행
-        setTimeout(() => triggerQuery(lastQuestion.current), 400);
+        setTimeout(() => triggerQuery(lastQuestion.current, { auto: true }), 400);
       }
     };
 
