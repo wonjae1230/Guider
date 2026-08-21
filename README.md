@@ -1,4 +1,17 @@
-# Guider
+# Guider <img width="40" height="43" alt="KakaoTalk_Photo_2026-08-21-15-14-37-1" src="https://github.com/user-attachments/assets/c674ce66-d710-4e14-a34c-f85198e86bb4" />
+<div align="center">
+
+### "설명은 그만. 목적은 당신이 정하고, 길은 가이더가 안내합니다."
+
+웹사이트 네비게이터(2026 세종 AX 해커톤 최우수상)🥈
+
+<img width="400" height="600" alt="IMG_9773" src="https://github.com/user-attachments/assets/5b2df2dd-fdb4-477b-96a9-770504fe49d5" />
+
+---
+<br> <br/>
+
+</div>
+
 
 웹 페이지 사용법을 AI가 안내해주는 크롬 익스텐션입니다.  
 사용자가 질문을 입력하면 현재 페이지의 DOM을 분석해 클릭해야 할 요소를 찾아 하이라이트로 안내합니다.
